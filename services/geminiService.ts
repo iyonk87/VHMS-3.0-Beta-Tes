@@ -23,14 +23,13 @@ const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string
 };
 
 const getGenAI = () => {
-  // FIX: Replaced complex API key retrieval logic to strictly use `process.env.API_KEY` as per the coding guidelines.
-  // This resolves the TypeScript error `Property 'env' does not exist on type 'ImportMeta'` and ensures compliance with the specified API key handling method.
-  const apiKey = process.env.API_KEY;
+  // FIX KRITIS 44: Mengubah API_KEY yang salah menjadi variabel wajib CRA.
+  const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
 
   if (!apiKey) {
-    console.error("API Key not found. Make sure the API_KEY environment variable is set.");
+    console.error("API Key not found. Make sure the REACT_APP_GEMINI_API_KEY environment variable is set.");
     throw new Error(
-      "API Key not found. Make sure the API_KEY environment variable is set."
+      "API Key not found. Make sure the REACT_APP_GEMINI_API_KEY environment variable is set."
     );
   }
 
