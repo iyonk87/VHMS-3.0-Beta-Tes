@@ -13,6 +13,12 @@ import { cacheService } from './cacheService';
 
 // Helper to convert File object to a base64 string for the API.
 const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string): Promise<Part> => {
+  // --- FIX KRITIS 45: VALIDASI TIPE DATA ---
+  if (!(file instanceof File) && !(file instanceof Blob)) {
+      console.error("[VHMS FATAL] Invalid input type passed to fileToGenerativePart:", file);
+      throw new Error("Input gambar yang harus dianalisis hilang atau tidak valid (Bukan File/Blob).");
+  }
+  // --- AKHIR VALIDASI ---
   const base64EncodedDataPromise = new Promise<string>((resolve) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
