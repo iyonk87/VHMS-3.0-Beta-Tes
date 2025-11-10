@@ -29,18 +29,18 @@ const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string
 };
 
 const getGenAI = () => {
-  // FIX KRITIS 46: Mengubah ke prefix VITE_ untuk kompatibilitas Vercel yang lebih tinggi
-  // Kita gunakan process.env sebagai fallback umum
-  const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.REACT_APP_GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    // FIX KRITIS 49: Menggunakan syntax native Vite untuk membaca ENV
+    // Fix: Cast import.meta to any to resolve TypeScript error regarding the 'env' property.
+    const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY; 
+    
+    if (!apiKey) {
+        console.error("API Key not found. Make sure the VITE_GEMINI_API_KEY environment variable is set.");
+        throw new Error(
+            "API Key not found. Make sure the VITE_GEMINI_API_KEY environment variable is set."
+        );
+    }
 
-  if (!apiKey) {
-    console.error("API Key not found. Make sure the VITE_GEMINI_API_KEY environment variable is set.");
-    throw new Error(
-      "API Key not found. Make sure the VITE_GEMINI_API_KEY environment variable is set."
-    );
-  }
-
-  return new GoogleGenAI({ apiKey });
+    return new GoogleGenAI({ apiKey });
 };
 
 // --- Schemas for Reliable JSON Output ---
