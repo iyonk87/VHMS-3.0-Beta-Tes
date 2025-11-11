@@ -9,7 +9,7 @@ import { Tooltip } from './common/Tooltip';
 import { 
     LayersIcon, CheckCircleIcon, XCircleIcon, RefreshIcon,
     MagicWandIcon, PersonPoseIcon, SunIcon, BlueprintIcon,
-    PaletteIcon
+    PaletteIcon, EditIcon, TrashIcon
 } from './icons/Icons';
 
 interface AnalysisPanelProps {
@@ -26,6 +26,9 @@ interface AnalysisPanelProps {
   onRegenerate: (module: RegeneratableModule) => void;
   sceneSource: SceneSource;
   analysisModels: AnalysisModelsState;
+  interactionMask: string | null;
+  onOpenMaskEditor: () => void;
+  onClearMask: () => void;
 }
 
 const Shimmer: React.FC = () => <div className="w-full h-4 bg-slate-700 rounded animate-pulse"></div>;
@@ -85,7 +88,8 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
     analysisData, isLoading, error, isCached,
     vfxData, poseData, shadowData, perspectiveData, photometricData,
     secondaryAnalysisState, onRegenerate,
-    sceneSource, analysisModels
+    sceneSource, analysisModels,
+    interactionMask, onOpenMaskEditor, onClearMask,
 }) => {
   
   const showSecondaryControls = sceneSource === 'upload' || sceneSource === 'reference';
@@ -116,16 +120,43 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
         
         {analysisData && (
           <div className="space-y-3">
-                <div className="p-3 bg-slate-900/50 rounded-md border border-slate-700/50">
-                    <div className="flex justify-between items-center mb-2">
+                <div className="p-3 bg-slate-900/50 rounded-md border border-slate-700/50 text-xs text-slate-400 space-y-2">
+                    <div className="flex justify-between items-center">
                         <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-                            <LayersIcon className="w-4 h-4"/> Analisis Primer
+                            <LayersIcon className="w-4 h-4"/> Rangkuman Analisis Primer
                         </h3>
                         {isCached && <Tooltip text="Data ini dimuat dari cache sesi."><span className="text-xs text-teal-400 font-semibold">Cached</span></Tooltip>}
                     </div>
-                    <p className="text-xs text-slate-400">
-                        Analisis fundamental dari scene dan subjek telah berhasil diselesaikan.
-                    </p>
+                    <div className="space-y-1">
+                        <p><strong>Komposisi:</strong> {analysisData.sceneComposition}</p>
+                        <p><strong>Pencahayaan:</strong> {analysisData.lighting}</p>
+                        <p><strong>Kamera:</strong> {analysisData.cameraDetails}</p>
+                        {analysisData.depthAnalysis.occlusionSuggestion && (
+                            <div className="pt-2 mt-2 border-t border-slate-700/50">
+                                <p className="font-semibold text-slate-300">Saran Interaksi Kedalaman:</p>
+                                <p>"{analysisData.depthAnalysis.occlusionSuggestion}"</p>
+                                <div className="mt-2 flex items-center gap-3">
+                                    <button
+                                        onClick={onOpenMaskEditor}
+                                        disabled={!showSecondaryControls}
+                                        className="bg-amber-600/80 text-white text-xs font-semibold px-3 py-1 rounded-md hover:bg-amber-500 disabled:bg-slate-600 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                    >
+                                        <EditIcon className="w-3 h-3"/>
+                                        {interactionMask ? 'Edit Masker' : 'Buat Masker'}
+                                    </button>
+                                    {interactionMask && (
+                                        <>
+                                            <img src={interactionMask} alt="mask preview" className="w-8 h-8 rounded-sm border border-slate-600 object-contain bg-black" />
+                                            <button onClick={onClearMask} title="Hapus Masker" className="text-red-400 hover:text-red-300">
+                                                <TrashIcon className="w-4 h-4"/>
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                                {!showSecondaryControls && <p className="text-[11px] text-slate-500 mt-1">Buat Masker dinonaktifkan dalam mode 'Dari Prompt'.</p>}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {showSecondaryControls && (

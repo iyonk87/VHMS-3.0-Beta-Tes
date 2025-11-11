@@ -235,7 +235,7 @@ async function callGeminiImageAPI(promptParts: Part[]): Promise<string> {
   try {
     const ai = getGenAI();
     const model = 'gemini-2.5-flash-image';
-    console.log(`[GeminiService] Calling model ${model} for image output...`);
+    console.log(`[GeminiService] Calling model ${model} for image output with ${promptParts.length} parts...`);
 
     const response = await ai.models.generateContent({
       model,
@@ -440,6 +440,25 @@ export const performPhotometricAnalysis = async (
     return { data, isCached: false };
 };
 
+const dataUrlToBlob = (dataUrl: string): Blob => {
+    const arr = dataUrl.split(',');
+    if (arr.length < 2) {
+        throw new Error('Invalid data URL');
+    }
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    if (!mimeMatch || mimeMatch.length < 2) {
+        throw new Error('Could not determine MIME type from data URL');
+    }
+    const mime = mimeMatch[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+};
+
 export const generateFinalImage = async (
   finalPrompt: string,
   sceneSource: SceneSource,
@@ -448,9 +467,14 @@ export const generateFinalImage = async (
   referenceImage: FileWithPreview | null,
   interactionMask: string | null
 ): Promise<string> => {
-  const parts: Part[] = [{ text: finalPrompt }];
+  const parts: Part[] = [];
+  
+  let augmentedPrompt = finalPrompt;
+
+  // Add subject image
   parts.push(await fileToGenerativePart(subjectImage));
 
+  // Add scene/reference image
   let baseImage: FileWithPreview | null = null;
   if (sceneSource === 'upload' && sceneImage) baseImage = sceneImage;
   if (sceneSource === 'reference' && referenceImage) baseImage = referenceImage;
@@ -458,7 +482,20 @@ export const generateFinalImage = async (
   if (baseImage) {
     parts.push(await fileToGenerativePart(baseImage));
   }
+
+  // Handle interaction mask if it exists
+  if (interactionMask) {
+    console.log("[GeminiService] Interaction mask found. Augmenting prompt and adding mask part.");
+    augmentedPrompt += "\n\n**--- MASKING & OCCLUSION DIRECTIVE ---**\nA black and white interaction mask is provided as an image part. The subject must appear BEHIND the white areas of this mask to create a realistic occlusion effect with foreground elements.";
+
+    const maskBlob = dataUrlToBlob(interactionMask);
+    // Use a specific mimeType for the mask
+    parts.push(await fileToGenerativePart(maskBlob, 'image/png'));
+  }
   
+  // The text prompt should be the first part in the array for many multi-modal models.
+  parts.unshift({ text: augmentedPrompt });
+
   return callGeminiImageAPI(parts);
 };
 

@@ -114,6 +114,7 @@ const App: React.FC = () => {
         setPhotometricData(null);
         setFinalPrompt(null);
         setOutputImage(null);
+        setInteractionMask(null);
         setSecondaryAnalysisState(initialSecondaryAnalysisState);
         facialVectorHandlers.reset();
 
@@ -135,6 +136,7 @@ const App: React.FC = () => {
         setPhotometricData(null);
         setFinalPrompt(null);
         setOutputImage(null);
+        setInteractionMask(null);
         setSecondaryAnalysisState(initialSecondaryAnalysisState);
         facialVectorHandlers.reset();
         setActiveDeckPanel('analysis');
@@ -219,6 +221,9 @@ const App: React.FC = () => {
     
     const runAllSecondaryAnalyses = async (primaryData: ComprehensiveAnalysisData) => {
         setAppStatus('ANALYZING_SECONDARY');
+
+        // Helper function to add a delay
+        const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
         
         const imageForSecondary = sceneSource === 'upload' ? sceneImage : referenceImage;
         if (!imageForSecondary) {
@@ -228,20 +233,26 @@ const App: React.FC = () => {
             return;
         }
         
-        const runDependentAnalyses = async () => {
+        // This function now runs sequentially with delays to prevent rate-limiting
+        const runAnalysesWithStaggering = async () => {
             try {
+                // --- Chain 1: Dependent Analyses ---
                 setStatusMessage('Menganalisis: VFX & Interaksi...');
                 setSecondaryAnalysisState(s => ({ ...s, vfx: { ...s.vfx, loading: true } }));
                 const { data: vfxRes, isCached: vfxCached } = await geminiService.getVFXSuggestions(imageForSecondary, primaryData, analysisModels.vfx);
                 setVfxData(vfxRes);
                 setSecondaryAnalysisState(s => ({ ...s, vfx: { loading: false, error: null, cached: vfxCached } }));
-                
+
+                await sleep(250); // Stagger before next call
+
                 if (vfxRes.smartInteraction) {
                     setStatusMessage('Menganalisis: Adaptasi Pose...');
                     setSecondaryAnalysisState(s => ({ ...s, pose: { ...s.pose, loading: true } }));
                     const { data: poseRes, isCached: poseCached } = await geminiService.adaptPoseForInteraction(subjectImage!, primaryData.subjectPose, vfxRes.smartInteraction.placementSuggestion, analysisModels.pose);
                     setPoseData(poseRes);
                     setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: poseCached } }));
+                    
+                    await sleep(250); // Stagger before next call
 
                     setStatusMessage('Menganalisis: Bayangan...');
                     setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true } }));
@@ -250,43 +261,40 @@ const App: React.FC = () => {
                     setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: shadowCached } }));
 
                 } else {
-                    setStatusMessage('Menganalisis: Bayangan...');
                     setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: false } }));
+                    setStatusMessage('Menganalisis: Bayangan...');
                     setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true } }));
                     const { data: shadowRes, isCached: shadowCached } = await geminiService.generateShadowDescription(primaryData.subjectPose, "No specific interaction", primaryData.lighting, analysisModels.shadow);
                     setShadowData(shadowRes);
                     setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: shadowCached } }));
                 }
-            } catch(e) {
-                const errorMsg = e instanceof Error ? e.message : String(e);
-                console.error("Error in dependent analysis chain:", e);
-                setError(errorMsg);
-                setAppStatus('ERROR');
-            }
-        };
+                
+                await sleep(250); // Stagger before next chain
 
-        const runIndependentAnalyses = async () => {
-           try {
+                // --- Chain 2: Independent Analyses ---
                 setStatusMessage('Menganalisis: Perspektif...');
                 setSecondaryAnalysisState(s => ({ ...s, perspective: { ...s.perspective, loading: true } }));
                 const { data: perspRes, isCached: perspCached } = await geminiService.analyzeScenePerspective(imageForSecondary, analysisModels.perspective);
                 setPerspectiveData(perspRes);
                 setSecondaryAnalysisState(s => ({ ...s, perspective: { loading: false, error: null, cached: perspCached } }));
 
+                await sleep(250); // Stagger before next call
+
                 setStatusMessage('Menganalisis: Fotometrik...');
                 setSecondaryAnalysisState(s => ({ ...s, photometric: { ...s.photometric, loading: true } }));
                 const { data: photoRes, isCached: photoCached } = await geminiService.performPhotometricAnalysis(imageForSecondary, primaryData.lighting, analysisModels.photometric);
                 setPhotometricData(photoRes);
                 setSecondaryAnalysisState(s => ({ ...s, photometric: { loading: false, error: null, cached: photoCached } }));
-           } catch(e) {
+
+            } catch(e) {
                 const errorMsg = e instanceof Error ? e.message : String(e);
-                console.error("Error in independent analysis chain:", e);
+                console.error("Error during staggered secondary analysis chain:", e);
                 setError(errorMsg);
                 setAppStatus('ERROR');
-           }
+            }
         };
         
-        await Promise.all([runDependentAnalyses(), runIndependentAnalyses()]);
+        await runAnalysesWithStaggering();
         
         setAppStatus('IDLE');
         setStatusMessage('');
@@ -467,6 +475,11 @@ const App: React.FC = () => {
     const handleModelChange = (module: keyof AnalysisModelsState, value: AnalysisModelSelection) => {
         setAnalysisModels(prev => ({...prev, [module]: value}));
     };
+
+    const onClearMask = useCallback(() => {
+        setInteractionMask(null);
+        console.log("[VHMS]: Masker interaksi telah dihapus.");
+    }, []);
     
     // FIX: Memoize complex prop objects passed to ControlDeck to prevent unnecessary re-renders.
     const analysisProps = useMemo(() => ({
@@ -483,7 +496,10 @@ const App: React.FC = () => {
         onRegenerate: handleRegenerateModule,
         sceneSource,
         analysisModels,
-    }), [analysisData, appStatus, error, vfxData, poseData, shadowData, perspectiveData, photometricData, secondaryAnalysisState, handleRegenerateModule, sceneSource, analysisModels]);
+        interactionMask,
+        onOpenMaskEditor: () => setMaskEditorOpen(true),
+        onClearMask,
+    }), [analysisData, appStatus, error, vfxData, poseData, shadowData, perspectiveData, photometricData, secondaryAnalysisState, handleRegenerateModule, sceneSource, analysisModels, interactionMask, onClearMask]);
 
     const promptProps = useMemo(() => ({
         finalPrompt,
@@ -509,6 +525,10 @@ const App: React.FC = () => {
     const handlePanelChange = useCallback((panel: ActivePanel) => {
         setActiveDeckPanel(prev => (prev === panel ? null : panel));
     }, []);
+
+    const sceneImageForEditor = useMemo(() => {
+        return sceneSource === 'upload' ? sceneImage : referenceImage;
+    }, [sceneSource, sceneImage, referenceImage]);
 
     return (
         <ApiKeyProvider>
@@ -588,14 +608,17 @@ const App: React.FC = () => {
                         onApply={handleApplyCrop}
                     />
                 )}
-                {isMaskEditorOpen && sceneImage && analysisData?.depthAnalysis.occlusionSuggestion && (
+                {isMaskEditorOpen && sceneImageForEditor && analysisData?.depthAnalysis.occlusionSuggestion && (
                     <MaskEditor 
                         isOpen={isMaskEditorOpen}
                         onClose={() => setMaskEditorOpen(false)}
-                        imageSrc={sceneImage.preview}
-                        onApply={setInteractionMask}
+                        imageSrc={sceneImageForEditor.preview}
+                        onApply={(maskDataUrl) => {
+                           setInteractionMask(maskDataUrl);
+                           setMaskEditorOpen(false);
+                        }}
                         occlusionSuggestion={analysisData.depthAnalysis.occlusionSuggestion}
-                        sceneImage={sceneImage}
+                        sceneImage={sceneImageForEditor}
                     />
                 )}
                 {isInpaintEditorOpen && outputImage && (
