@@ -25,7 +25,7 @@ export const Card: React.FC<CardProps> = ({ title, children, className = '', tit
           </Tooltip>
         )}
       </div>
-      <div className="p-3">
+      <div className="p-3 flex-grow flex flex-col min-h-0">
         {children}
       </div>
     </div>

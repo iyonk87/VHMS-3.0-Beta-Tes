@@ -19,9 +19,9 @@ export const PromptEnginePanel: React.FC<PromptEnginePanelProps> = ({ finalPromp
       className="flex flex-col flex-grow"
     >
       <div className="space-y-3 flex-grow flex flex-col">
-        <div className="flex-grow flex flex-col">
+        <div className="flex-grow flex flex-col min-h-0">
           <h3 className="text-xs font-medium text-slate-400">DIRECTOR'S BRIEFING:</h3>
-          <div className="mt-1 p-3 min-h-[200px] flex-grow bg-slate-900 rounded-md border border-slate-700 overflow-y-auto">
+          <div className="mt-1 p-3 flex-grow bg-slate-900 rounded-md border border-slate-700 overflow-y-auto">
             {isAnalyzing ? (
               <div className="space-y-2">
                 <div className="w-full h-4 bg-slate-700 rounded animate-pulse"></div>

@@ -1,18 +1,16 @@
 import React from 'react';
 import { 
     LayoutSidebarLeft, LayoutSidebarRight, ChevronDown, ChevronRight,
-    CheckCircleIcon, PromptIcon, HistoryIcon, FaceIdIcon 
+    CheckCircleIcon, HistoryIcon, FaceIdIcon 
 } from './icons/Icons';
 import { AnalysisPanel } from './AnalysisPanel';
-import { PromptEnginePanel } from './PromptEnginePanel';
 import { HistoryPanel } from './HistoryPanel';
 import { FacialVectorPanel } from './FacialVectorPanel';
 
 type AnalysisPanelProps = React.ComponentProps<typeof AnalysisPanel>;
-type PromptEnginePanelProps = React.ComponentProps<typeof PromptEnginePanel>;
 type HistoryPanelProps = React.ComponentProps<typeof HistoryPanel>;
 type FacialVectorPanelProps = React.ComponentProps<typeof FacialVectorPanel>;
-export type ActivePanel = 'analysis' | 'prompt' | 'history' | 'vector';
+export type ActivePanel = 'analysis' | 'history' | 'vector';
 
 interface ControlDeckProps {
   isCollapsed: boolean;
@@ -20,7 +18,6 @@ interface ControlDeckProps {
   activePanel: ActivePanel | null;
   onPanelChange: (panel: ActivePanel) => void;
   analysisProps: AnalysisPanelProps;
-  promptProps: PromptEnginePanelProps;
   historyProps: HistoryPanelProps;
   vectorProps: FacialVectorPanelProps;
 }
@@ -59,7 +56,6 @@ const ControlDeck: React.FC<ControlDeckProps> = ({
   activePanel,
   onPanelChange,
   analysisProps,
-  promptProps,
   historyProps,
   vectorProps,
 }) => {
@@ -91,15 +87,6 @@ const ControlDeck: React.FC<ControlDeckProps> = ({
           onToggle={() => onPanelChange('analysis')}
         >
           <AnalysisPanel {...analysisProps} />
-        </AccordionItem>
-        
-        <AccordionItem
-          title="PROMPT ENGINE"
-          icon={<PromptIcon className="w-4 h-4" />}
-          isOpen={activePanel === 'prompt'}
-          onToggle={() => onPanelChange('prompt')}
-        >
-          <PromptEnginePanel {...promptProps} />
         </AccordionItem>
         
         <AccordionItem

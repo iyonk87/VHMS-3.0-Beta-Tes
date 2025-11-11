@@ -13,6 +13,7 @@ import { InpaintEditor } from '../components/InpaintEditor';
 import { ApiKeyProvider } from './ApiKeyContext';
 import ControlDeck, { type ActivePanel } from '../components/ControlDeck';
 import { OutputPanel } from '../components/OutputPanel';
+import { PromptEnginePanel } from '../components/PromptEnginePanel';
 
 
 import * as geminiService from '../services/geminiService';
@@ -59,7 +60,7 @@ const App: React.FC = () => {
     const [photometricData, setPhotometricData] = useState<PhotometricAnalysisData | null>(null);
     const [secondaryAnalysisState, setSecondaryAnalysisState] = useState(initialSecondaryAnalysisState);
     const [analysisModels, setAnalysisModels] = useState<AnalysisModelsState>({
-        subject: 'Pro', scene: 'Pro', vfx: 'Pro', pose: 'Fast', 
+        subject: 'Fast', scene: 'Fast', vfx: 'Fast', pose: 'Fast', 
         shadow: 'Fast', perspective: 'Fast', photometric: 'Fast'
     });
     
@@ -208,7 +209,6 @@ const App: React.FC = () => {
                 runAllSecondaryAnalyses(data);
             } else {
                 setAppStatus('IDLE');
-                setActiveDeckPanel('prompt');
             }
             
         } catch (e) {
@@ -229,7 +229,6 @@ const App: React.FC = () => {
         if (!imageForSecondary) {
             console.error("No image available for secondary analysis.");
             setAppStatus('IDLE');
-            setActiveDeckPanel('prompt');
             return;
         }
         
@@ -298,7 +297,6 @@ const App: React.FC = () => {
         
         setAppStatus('IDLE');
         setStatusMessage('');
-        setActiveDeckPanel('prompt');
     };
 
     const runVFXAnalysis = useCallback(async (sceneImage: FileWithPreview, primaryData: ComprehensiveAnalysisData) => {
@@ -577,6 +575,7 @@ const App: React.FC = () => {
                             isHarmonizationEnabled={isHarmonizationEnabled}
                             setIsHarmonizationEnabled={setIsHarmonizationEnabled}
                         />
+                         <PromptEnginePanel {...promptProps} />
                     </div>
 
                     <div className={`transition-all duration-300 ease-in-out ${isControlDeckCollapsed ? 'col-span-12 lg:col-span-1' : 'col-span-12 lg:col-span-5'}`}>
@@ -586,7 +585,6 @@ const App: React.FC = () => {
                            activePanel={activeDeckPanel}
                            onPanelChange={handlePanelChange}
                            analysisProps={analysisProps}
-                           promptProps={promptProps}
                            historyProps={historyProps}
                            vectorProps={vectorProps}
                        />
