@@ -324,13 +324,12 @@ export const performComprehensiveAnalysis = async (
   const cached = cacheService.getComprehensive<ComprehensiveAnalysisData>(cacheKeyFiles);
   if (cached) return { data: cached, isCached: true };
 
-  console.log("[GeminiService] Starting Micro-Analysis Pipeline...");
+  console.log("[GeminiService] Starting Sequential Micro-Analysis Pipeline...");
 
-  const subjectPromise = analyzeSubject(subjectImage, outfitImage, subjectModel);
-  const scenePromise = analyzeScene(sceneImage, referenceImage, sceneSource, prompt, sceneModel);
+  // Run analyses sequentially to avoid rate limiting on initial burst.
+  const subjectData = await analyzeSubject(subjectImage, outfitImage, subjectModel);
+  const sceneData = await analyzeScene(sceneImage, referenceImage, sceneSource, prompt, sceneModel);
 
-  const [subjectData, sceneData] = await Promise.all([subjectPromise, scenePromise]);
-  
   const mergedData: ComprehensiveAnalysisData = {
     ...subjectData,
     ...sceneData
