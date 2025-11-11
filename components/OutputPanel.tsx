@@ -1,9 +1,10 @@
 import React from 'react';
-import type { StylePreset, Resolution, SceneSource, AppStatus } from '../types';
+import type { StylePreset, Resolution, SceneSource, AppStatus, AnalysisModelsState, AnalysisModelSelection, ComprehensiveAnalysisData } from '../types';
 import { Card } from './common/Card';
 import { Tooltip } from './common/Tooltip';
 // FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { GenerateIcon, DownloadIcon, ShieldCheckIcon, EditIcon, InfoCircleIcon, LayersIcon } from './icons/Icons';
+import { ModelConfiguration } from './ModelConfiguration';
 
 interface OutputPanelProps {
   outputImage: string | null;
@@ -16,6 +17,9 @@ interface OutputPanelProps {
   onStartEditing: () => void;
   consistencyWarning: string | null;
   sceneSource: SceneSource;
+  analysisModels: AnalysisModelsState;
+  onModelChange: (module: keyof AnalysisModelsState, value: AnalysisModelSelection) => void;
+  analysisData: ComprehensiveAnalysisData | null;
 }
 
 export const OutputPanel: React.FC<OutputPanelProps> = ({
@@ -29,6 +33,9 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
   onStartEditing,
   consistencyWarning,
   sceneSource,
+  analysisModels,
+  onModelChange,
+  analysisData,
 }) => {
   const isAnalyzing = appStatus.startsWith('ANALYZING');
   const isGenerating = appStatus === 'GENERATING_IMAGE' || appStatus === 'HARMONIZING';
@@ -133,6 +140,13 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
             </div>
           </div>
         )}
+
+        <ModelConfiguration
+          analysisModels={analysisModels}
+          onModelChange={onModelChange}
+          isDisabled={isBusy || !!analysisData}
+          sceneSource={sceneSource}
+        />
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button

@@ -483,7 +483,6 @@ const App: React.FC = () => {
         onRegenerate: handleRegenerateModule,
         sceneSource,
         analysisModels,
-        onModelChange: handleModelChange,
     }), [analysisData, appStatus, error, vfxData, poseData, shadowData, perspectiveData, photometricData, secondaryAnalysisState, handleRegenerateModule, sceneSource, analysisModels]);
 
     const promptProps = useMemo(() => ({
@@ -534,6 +533,9 @@ const App: React.FC = () => {
                             onStartEditing={() => setInpaintEditorOpen(true)}
                             consistencyWarning={consistencyWarning}
                             sceneSource={sceneSource}
+                            analysisModels={analysisModels}
+                            onModelChange={handleModelChange}
+                            analysisData={analysisData}
                         />
                         <InputPanel
                             subjectImage={subjectImage}
