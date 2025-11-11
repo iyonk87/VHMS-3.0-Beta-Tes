@@ -54,6 +54,7 @@ export interface ComprehensiveAnalysisData {
     // Scene Analysis
     lighting: string;
     lightingEffectOnSubject: string;
+
     sceneComposition: string;
     colorPalette: {
         dominant: string[];
@@ -122,6 +123,31 @@ export interface SecondaryAnalysisModuleState {
 
 // --- UI and State Management ---
 
+// Defines the global status of the application for the state machine.
+export type AppStatus =
+  | 'IDLE'          // Waiting for user action
+  | 'VERIFYING'     // Verifying inputs
+  | 'ANALYZING_PRIMARY' // Running comprehensive analysis
+  | 'ANALYZING_SECONDARY' // Running one or more secondary modules
+  | 'GENERATING_IMAGE'  // Calling the image generation model
+  | 'HARMONIZING'     // Post-processing the image
+  | 'DONE'          // Process complete, image is displayed
+  | 'ERROR';        // An error occurred
+
+// NEW: Defines the model selection for secondary analysis modules.
+export type AnalysisModelSelection = 'Pro' | 'Fast';
+
+// NEW: Defines the state structure for storing model selections.
+export interface AnalysisModelsState {
+    subject: AnalysisModelSelection;
+    scene: AnalysisModelSelection;
+    vfx: AnalysisModelSelection;
+    pose: AnalysisModelSelection;
+    shadow: AnalysisModelSelection;
+    perspective: AnalysisModelSelection;
+    photometric: AnalysisModelSelection;
+}
+
 // The structure of an item in the generation history.
 export interface HistoryItem {
     id: string;
@@ -142,7 +168,8 @@ export interface HistoryItem {
 // The result of the input verification process.
 export interface VerificationResult {
     subject: { valid: boolean; message: string };
-    scene: { valid: boolean; message: string; type?: 'info' };
+    // FIX: Allow 'success' as a valid type for the scene verification message.
+    scene: { valid: boolean; message: string; type?: 'info' | 'success' };
     outfit: { valid: boolean; message: string; type?: 'info' };
     prompt: { valid: boolean; message: string };
     overall: { valid: boolean; message: string };

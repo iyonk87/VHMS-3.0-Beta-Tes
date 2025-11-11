@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useRef } from 'react';
 import type { FileWithPreview } from '../../types';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { UploadIcon } from '../icons/Icons';
 
 interface DropZoneProps {
@@ -62,7 +63,7 @@ export const DropZone: React.FC<DropZoneProps> = ({ file, onDrop, title, descrip
 
   return (
     <div
-      className={`relative p-3 border border-solid rounded-md cursor-pointer transition-colors
+      className={`relative p-2 border border-solid rounded-md cursor-pointer transition-colors h-full flex flex-col justify-center
         ${isDragActive ? 'border-amber-500 bg-amber-900/20' : 'border-slate-600 hover:border-slate-500'}`}
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
@@ -79,25 +80,25 @@ export const DropZone: React.FC<DropZoneProps> = ({ file, onDrop, title, descrip
       />
       
       {file ? (
-        <div className={`relative group ${previewHeightClass}`}>
+        <div className={`relative group w-full h-full`}>
             <img src={file.preview} alt={file.name} className="w-full h-full object-cover rounded" />
             <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded">
-                <p className="text-white text-sm font-semibold">Ganti Gambar</p>
+                <p className="text-white text-xs font-semibold">Ganti Gambar</p>
             </div>
         </div>
       ) : (
-        <div className="text-center pt-8 pb-4">
-          <UploadIcon className="mx-auto h-8 w-8 text-slate-500" />
-          <p className="mt-2 text-sm text-slate-400">
-            <span className="font-semibold text-amber-400">Klik untuk unggah</span> atau seret
+        <div className="text-center flex flex-col items-center justify-center h-full p-1">
+          <UploadIcon className="mx-auto h-6 w-6 text-slate-500" />
+          <p className="mt-1 text-xs text-slate-400">
+            <span className="font-semibold text-amber-400">Klik</span> atau seret
           </p>
         </div>
       )}
       
-      <div className="absolute top-2 left-2 text-left z-10">
+      <div className="absolute top-1.5 left-1.5 text-left z-10">
         <div className="inline-block">
-            <h4 className="text-sm font-semibold text-slate-100 bg-slate-900/70 px-2 py-1 rounded backdrop-blur-sm">{title}</h4>
-            <p className="text-xs text-slate-300 bg-slate-900/70 px-2 py-0.5 mt-1 rounded backdrop-blur-sm">{description}</p>
+            <h4 className="text-xs font-semibold text-slate-100 bg-slate-900/70 px-2 py-0.5 rounded backdrop-blur-sm">{title}</h4>
+            <p className="text-[10px] text-slate-300 bg-slate-900/70 px-2 py-0.5 mt-1 rounded backdrop-blur-sm">{description}</p>
         </div>
       </div>
       

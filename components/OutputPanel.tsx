@@ -1,84 +1,45 @@
-import React, { useState, useEffect } from 'react';
-import type { StylePreset, Resolution, SceneSource } from '../types';
+import React from 'react';
+import type { StylePreset, Resolution, SceneSource, AppStatus } from '../types';
 import { Card } from './common/Card';
 import { Tooltip } from './common/Tooltip';
-import { GenerateIcon, DownloadIcon, ShieldCheckIcon, EditIcon, InfoCircleIcon } from './icons/Icons';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
+import { GenerateIcon, DownloadIcon, ShieldCheckIcon, EditIcon, InfoCircleIcon, LayersIcon } from './icons/Icons';
 
 interface OutputPanelProps {
   outputImage: string | null;
-  isGenerating: boolean;
+  appStatus: AppStatus;
+  statusMessage: string;
   onGenerate: () => void;
   onVerify: () => void;
   canGenerate: boolean;
-  stylePreset: StylePreset;
-  setStylePreset: (preset: StylePreset) => void;
-  resolution: Resolution;
-  setResolution: (resolution: Resolution) => void;
   error: string | null;
   onStartEditing: () => void;
   consistencyWarning: string | null;
   sceneSource: SceneSource;
-  isHarmonizationEnabled: boolean;
-  setIsHarmonizationEnabled: (enabled: boolean) => void;
 }
-
-const stylePresets: { id: StylePreset; label: string }[] = [
-  { id: 'Cinematic', label: 'Sinematik' },
-  { id: 'Studio', label: 'Studio' },
-  { id: 'Natural', label: 'Natural' },
-];
-
-const resolutions: { id: Resolution; label: string }[] = [
-  { id: 'HD', label: 'HD' },
-  { id: '2K', label: '2K' },
-  { id: '4K', label: '4K' },
-];
-
-const loadingMessages = [
-  "Menganalisis pencahayaan scene...",
-  "Mengunci identitas subjek...",
-  "Menyusun komposisi gambar...",
-  "Merender detail akhir & tekstur...",
-  "Hampir selesai, VHMS sedang memoles hasilnya...",
-];
 
 export const OutputPanel: React.FC<OutputPanelProps> = ({
   outputImage,
-  isGenerating,
+  appStatus,
+  statusMessage,
   onGenerate,
   onVerify,
   canGenerate,
-  stylePreset,
-  setStylePreset,
-  resolution,
-  setResolution,
   error,
   onStartEditing,
   consistencyWarning,
   sceneSource,
-  isHarmonizationEnabled,
-  setIsHarmonizationEnabled,
 }) => {
-  const [loadingMessage, setLoadingMessage] = useState<string>(loadingMessages[0]);
-  const isBackgroundMode = sceneSource === 'upload'; // Helper variable
+  const isAnalyzing = appStatus.startsWith('ANALYZING');
+  const isGenerating = appStatus === 'GENERATING_IMAGE' || appStatus === 'HARMONIZING';
+  const isBusy = !['IDLE', 'DONE', 'ERROR'].includes(appStatus);
 
-  useEffect(() => {
-    // FIX: Replaced `NodeJS.Timeout` with `ReturnType<typeof setInterval>` for browser compatibility.
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    if (isGenerating) {
-      let i = 0;
-      setLoadingMessage(loadingMessages[0]);
-      intervalId = setInterval(() => {
-        i = (i + 1) % loadingMessages.length;
-        setLoadingMessage(loadingMessages[i]);
-      }, 2500);
-    }
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [isGenerating]);
+  const getButtonText = () => {
+    if (appStatus === 'VERIFYING') return 'Memverifikasi...';
+    if (isAnalyzing) return 'Menganalisis...';
+    if (isGenerating) return 'Memproses...';
+    return 'Mulai Generasi';
+  }
 
   return (
     <Card 
@@ -88,7 +49,7 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
     >
       <div className="space-y-4">
         <div className="aspect-video bg-slate-900 rounded-md flex items-center justify-center border border-slate-700 overflow-hidden relative">
-          {isGenerating ? (
+          {isAnalyzing || isGenerating ? (
             <div className="text-center p-4 flex flex-col items-center justify-center">
               <div className="relative w-20 h-20 mb-4">
                 <svg className="w-full h-full" viewBox="0 0 100 100">
@@ -103,13 +64,17 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
                     r="45" cx="50" cy="50"
                   />
                 </svg>
-                <GenerateIcon className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-amber-500/80" />
+                {isAnalyzing ? (
+                    <LayersIcon className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-amber-500/80" />
+                ) : (
+                    <GenerateIcon className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-amber-500/80" />
+                )}
               </div>
               <p className="mt-2 text-sm font-semibold text-slate-300 transition-opacity duration-500">
-                {loadingMessage}
+                {statusMessage}
               </p>
               <p className="mt-1 text-xs text-slate-400">
-                Proses ini mungkin memakan waktu sejenak.
+                {isAnalyzing ? "AI sedang menganalisis gambar Anda..." : "Proses ini mungkin memakan waktu sejenak."}
               </p>
               <style>{`
                 .progress-ring__circle {
@@ -139,7 +104,7 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
               <p className="text-xs mt-1">Jalankan Analisis dan Prompt Engine, lalu klik "Mulai Generasi".</p>
             </div>
           )}
-          {outputImage && !isGenerating && !error && (
+          {outputImage && !isGenerating && !isAnalyzing && !error && (
             <div className="absolute top-2 right-2 flex gap-2">
               <button
                 onClick={onStartEditing}
@@ -172,6 +137,7 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             onClick={onVerify}
+            disabled={isBusy}
             className="w-full bg-slate-700 border border-slate-600 text-slate-200 font-semibold py-2 px-4 rounded-md hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             <ShieldCheckIcon className="w-5 h-5" />
@@ -179,69 +145,12 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
           </button>
           <button
             onClick={onGenerate}
-            disabled={!canGenerate || isGenerating}
+            disabled={!canGenerate || isBusy}
             className="w-full bg-amber-500 text-slate-900 font-semibold py-2 px-4 rounded-md hover:bg-amber-600 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             <GenerateIcon className="w-5 h-5" />
-            {isGenerating ? 'Memproses...' : 'Mulai Generasi'}
+            {getButtonText()}
           </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-700">
-          <div className={isBackgroundMode ? 'opacity-50 cursor-not-allowed' : ''}>
-            <Tooltip text={isBackgroundMode ? "Preset Gaya dinonaktifkan dalam mode Latar Belakang. Gaya ditentukan oleh gambar scene untuk memastikan realisme." : "Pilih gaya visual untuk gambar yang dihasilkan."}>
-                <label className="block text-xs font-medium text-slate-400 mb-2">PRESET GAYA</label>
-            </Tooltip>
-            <div className="flex bg-slate-700/50 p-1 rounded-md border border-slate-700">
-              {stylePresets.map(preset => (
-                <button
-                  key={preset.id}
-                  onClick={() => setStylePreset(preset.id)}
-                  disabled={isBackgroundMode}
-                  className={`w-1/3 py-1 text-xs rounded transition-colors ${stylePreset === preset.id && !isBackgroundMode ? 'bg-slate-600 text-amber-400 font-semibold' : 'text-slate-300'} ${!isBackgroundMode ? 'hover:bg-slate-700' : ''}`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-2">RESOLUSI OUTPUT</label>
-            <div className="flex bg-slate-700/50 p-1 rounded-md border border-slate-700">
-              {resolutions.map(res => (
-                <button
-                  key={res.id}
-                  onClick={() => setResolution(res.id)}
-                  className={`w-1/3 py-1 text-xs rounded transition-colors ${resolution === res.id ? 'bg-slate-600 text-amber-400 font-semibold' : 'text-slate-300 hover:bg-slate-700'}`}
-                >
-                  {res.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="pt-3 border-t border-slate-700">
-            <div className="flex justify-between items-center">
-                <Tooltip text="Saat diaktifkan, AI akan melakukan analisis pasca-proses untuk menyelaraskan color bleeding, grain, dan ketajaman antara subjek dan scene, menghasilkan integrasi yang lebih fotorealistis.">
-                    <label htmlFor="harmonization-toggle" className="flex items-center gap-2 cursor-pointer">
-                        <span className="text-xs font-medium text-slate-400">HARMONISASI AKHIR (REALISME+)</span>
-                    </label>
-                </Tooltip>
-                <button
-                  id="harmonization-toggle"
-                  type="button"
-                  role="switch"
-                  aria-checked={isHarmonizationEnabled}
-                  onClick={() => setIsHarmonizationEnabled(!isHarmonizationEnabled)}
-                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-slate-800 ${isHarmonizationEnabled ? 'bg-amber-500' : 'bg-slate-600'}`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isHarmonizationEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                  />
-                </button>
-            </div>
         </div>
       </div>
     </Card>

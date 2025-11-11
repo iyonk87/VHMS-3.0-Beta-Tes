@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { BrushIcon, TrashIcon, MagicWandIcon, InfoCircleIcon } from './icons/Icons';
-import { EraserIcon } from './icons/Icons';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
+import { BrushIcon, TrashIcon, MagicWandIcon, InfoCircleIcon, EraserIcon } from './icons/Icons';
 import { generateObjectMask } from '../services/geminiService';
 import type { FileWithPreview } from '../types';
 import { Tooltip } from './common/Tooltip';

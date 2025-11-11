@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { BrushIcon, TrashIcon, EraserIcon, GenerateIcon } from './icons/Icons';
 import { performInpainting } from '../services/geminiService';
 

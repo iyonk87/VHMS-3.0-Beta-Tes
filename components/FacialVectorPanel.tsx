@@ -1,5 +1,6 @@
 import React from 'react';
 import { Card } from './common/Card';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { FaceIdIcon, CheckCircleIcon, XCircleIcon } from './icons/Icons';
 import type { Landmark } from '../types';
 

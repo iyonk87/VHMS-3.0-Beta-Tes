@@ -1,6 +1,7 @@
 import React from 'react';
 import type { HistoryItem } from '../types';
 import { Card } from './common/Card';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { HistoryIcon, ReloadIcon } from './icons/Icons';
 
 interface HistoryPanelProps {

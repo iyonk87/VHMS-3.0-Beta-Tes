@@ -7,18 +7,17 @@ import type {
   PoseAdaptationData,
   ShadowCastingData,
   PerspectiveAnalysisData,
-  PhotometricAnalysisData
+  PhotometricAnalysisData,
+  AnalysisModelSelection
 } from '../types';
 import { cacheService } from './cacheService';
 
 // Helper to convert File object to a base64 string for the API.
 const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string): Promise<Part> => {
-  // --- FIX KRITIS 45: VALIDASI TIPE DATA ---
   if (!(file instanceof File) && !(file instanceof Blob)) {
       console.error("[VHMS FATAL] Invalid input type passed to fileToGenerativePart:", file);
       throw new Error("Input gambar yang harus dianalisis hilang atau tidak valid (Bukan File/Blob).");
   }
-  // --- AKHIR VALIDASI ---
   const base64EncodedDataPromise = new Promise<string>((resolve) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
@@ -29,23 +28,62 @@ const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string
 };
 
 const getGenAI = () => {
-    // FIX KRITIS 49: Menggunakan syntax native Vite untuk membaca ENV
-    // Fix: Cast import.meta to any to resolve TypeScript error regarding the 'env' property.
-    const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY; 
-    
-    if (!apiKey) {
-        console.error("API Key not found. Make sure the VITE_GEMINI_API_KEY environment variable is set.");
-        throw new Error(
-            "API Key not found. Make sure the VITE_GEMINI_API_KEY environment variable is set."
-        );
+    // STRATEGI GANDA (BILINGUAL) UNTUK STABILITAS MAKSIMAL:
+    // 1. Coba metode Vite standar terlebih dahulu (import.meta.env). Ini berfungsi untuk pengembangan lokal
+    //    dengan file .env dan platform hosting web modern (Vercel, Netlify).
+    let apiKey: string | undefined;
+    try {
+      apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    } catch (e) {
+      // Abaikan error jika import.meta tidak tersedia
     }
 
+    // 2. Jika metode Vite gagal, coba metode standar platform/backend (process.env).
+    //    Ini untuk kompatibilitas mundur dengan lingkungan seperti AI Studio.
+    if (!apiKey && typeof process !== 'undefined' && process.env) {
+        apiKey = (process.env as any).API_KEY;
+    }
+
+    // 3. Periksa apakah kunci API ditemukan.
+    if (!apiKey) {
+        console.error("FATAL: VITE_GEMINI_API_KEY tidak ditemukan atau kosong. Aplikasi tidak dapat berfungsi.");
+        // Kita teruskan placeholder agar error bisa ditangkap dengan baik oleh interceptor di bawah.
+        return new GoogleGenAI({ apiKey: "FATAL_NO_API_KEY_FOUND" });
+    }
+    
+    // 4. Jika kunci ditemukan, inisialisasi GenAI.
     return new GoogleGenAI({ apiKey });
+};
+
+// --- Error Interceptor ---
+const handleGeminiError = (error: any): never => {
+  console.error("[GeminiService] Raw API Error Intercepted:", error);
+
+  const errorMessage = error.message || JSON.stringify(error);
+  
+  // 1. Tangani Error Kunci API Hilang/Invalid dengan pesan yang jelas
+  if (errorMessage.includes("API key") || errorMessage.includes("FATAL_NO_API_KEY_FOUND")) {
+       throw new Error("Kunci API tidak ditemukan. Pastikan VITE_GEMINI_API_KEY telah diatur dengan benar di environment variables Anda.");
+  }
+
+  // 2. Tangani Error 429 (Resource Exhausted / Quota Exceeded)
+  if (
+    error.status === 429 ||
+    errorMessage.includes("429") ||
+    errorMessage.includes("quota") ||
+    errorMessage.includes("RESOURCE_EXHAUSTED")
+  ) {
+    throw new Error(
+      "⚠️ Layanan Sedang Sibuk (Batas Kuota Gratis Tercapai).\n" +
+      "Terlalu banyak permintaan dalam waktu singkat. Mohon tunggu sekitar 30-60 detik agar kuota Anda pulih, lalu coba lagi. VHMS Team"
+    );
+  }
+
+  throw error;
 };
 
 // --- Schemas for Reliable JSON Output ---
 
-// [REFACTOR] Schema for Subject-only analysis
 const subjectAnalysisSchema = {
     type: Type.OBJECT,
     properties: {
@@ -63,7 +101,6 @@ const subjectAnalysisSchema = {
     }
 };
 
-// [REFACTOR] Schema for Scene-only analysis
 const sceneAnalysisSchema = {
     type: Type.OBJECT,
     properties: {
@@ -93,7 +130,6 @@ const sceneAnalysisSchema = {
         },
     }
 };
-
 
 const vfxSchema = {
   type: Type.OBJECT,
@@ -142,7 +178,6 @@ const perspectiveSchema = {
   required: ['recommendedSubjectScale', 'vanishingPointCoordinates', 'reasoning'],
 };
 
-// [PENAMBAHAN BARU] Schema for Photometric Analysis
 const lightSourceSchema = {
     type: Type.OBJECT,
     properties: {
@@ -166,58 +201,72 @@ const photometricSchema = {
     required: ['keyLight', 'fillLight', 'rimLight', 'ambientBounceLight', 'globalMood'],
 };
 
-
 // --- Generic API Call Helpers ---
 
-async function callGeminiAPI<T>(model: string, promptParts: Part[], schema: object): Promise<T> {
-  const ai = getGenAI();
-  console.log(`[GeminiService] Calling model ${model} for JSON output...`);
-  const response = await ai.models.generateContent({
-    model,
-    contents: { parts: promptParts },
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: schema as any,
-    },
-  });
+const getModelName = (selection: AnalysisModelSelection): string => {
+  return selection === 'Pro' ? 'gemini-2.5-pro' : 'gemini-flash-latest';
+};
 
+async function callGeminiAPI<T>(modelName: string, promptParts: Part[], schema: object): Promise<T> {
   try {
+    const ai = getGenAI();
+    console.log(`[GeminiService] Calling model ${modelName} for JSON output...`);
+  
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: { parts: promptParts },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema as any,
+      },
+    });
+
     const jsonText = response.text.trim();
     const cleanedJson = jsonText.replace(/^```json\s*|```\s*$/g, '');
     return JSON.parse(cleanedJson) as T;
+
   } catch (e) {
-    console.error("Failed to parse JSON response:", response.text, e);
-    throw new Error("Received an invalid JSON response from the AI model.");
+    handleGeminiError(e);
+    throw e; 
   }
 }
 
 async function callGeminiImageAPI(promptParts: Part[]): Promise<string> {
-  const ai = getGenAI();
-  const model = 'gemini-2.5-flash-image';
-  console.log(`[GeminiService] Calling model ${model} for image output...`);
+  try {
+    const ai = getGenAI();
+    const model = 'gemini-2.5-flash-image';
+    console.log(`[GeminiService] Calling model ${model} for image output...`);
 
-  const response = await ai.models.generateContent({
-    model,
-    contents: { parts: promptParts },
-    config: {
-      responseModalities: [Modality.IMAGE],
-    },
-  });
+    const response = await ai.models.generateContent({
+      model,
+      contents: { parts: promptParts },
+      config: {
+        responseModalities: [Modality.IMAGE],
+      },
+    });
 
-  for (const part of response.candidates[0].content.parts) {
-    if (part.inlineData) {
-      const base64ImageBytes: string = part.inlineData.data;
-      return `data:${part.inlineData.mimeType};base64,${base64ImageBytes}`;
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData) {
+        const base64ImageBytes: string = part.inlineData.data;
+        return `data:${part.inlineData.mimeType};base64,${base64ImageBytes}`;
+      }
     }
-  }
 
-  throw new Error("No image was generated by the model.");
+    throw new Error("No image was generated by the model.");
+
+  } catch (e) {
+    handleGeminiError(e);
+    throw e;
+  }
 }
 
-// --- [REFACTORED] Primary Analysis Pipeline ---
+// --- Primary Analysis Pipeline ---
 
-// [NEW] Internal function for subject-only analysis
-const analyzeSubject = async (subjectImage: FileWithPreview, outfitImage: FileWithPreview | null) => {
+const analyzeSubject = async (
+    subjectImage: FileWithPreview, 
+    outfitImage: FileWithPreview | null,
+    modelSelection: AnalysisModelSelection
+) => {
     const parts: Part[] = [await fileToGenerativePart(subjectImage)];
     let prompt = "Analyze the provided subject image for identity locking, pose, facial expression (using FACS), and key landmarks.";
     if(outfitImage){
@@ -225,13 +274,21 @@ const analyzeSubject = async (subjectImage: FileWithPreview, outfitImage: FileWi
         prompt += "\nA second image is provided as an outfit reference. Describe this outfit for the subject.";
     }
     parts.unshift({ text: prompt });
-    return callGeminiAPI<any>('gemini-2.5-pro', parts, subjectAnalysisSchema);
+    const modelName = getModelName(modelSelection);
+    return callGeminiAPI<any>(modelName, parts, subjectAnalysisSchema);
 };
 
-// [NEW] Internal function for scene-only analysis
-const analyzeScene = async (sceneImage: FileWithPreview | null, referenceImage: FileWithPreview | null, sceneSource: SceneSource, prompt: string) => {
-    if ((sceneSource === 'upload' && !sceneImage) || (sceneSource === 'reference' && !referenceImage)) {
-        // If the scene should come from a prompt, generate a placeholder scene analysis
+const analyzeScene = async (
+    sceneImage: FileWithPreview | null, 
+    referenceImage: FileWithPreview | null, 
+    sceneSource: SceneSource, 
+    prompt: string,
+    modelSelection: AnalysisModelSelection
+) => {
+    // FIX: Added a more robust guard clause to handle the 'generate' case explicitly
+    // and prevent trying to analyze a null image.
+    const noImageAvailable = (sceneSource === 'upload' && !sceneImage) || (sceneSource === 'reference' && !referenceImage);
+    if (sceneSource === 'generate' || noImageAvailable) {
         return {
             lighting: "Inferred from prompt",
             lightingEffectOnSubject: "To be determined by AI based on prompt",
@@ -244,11 +301,13 @@ const analyzeScene = async (sceneImage: FileWithPreview | null, referenceImage: 
     }
 
     const imageToAnalyze = sceneSource === 'upload' ? sceneImage : referenceImage;
+    // This check is now safe because the guard clause above handles the null cases.
     const parts: Part[] = [await fileToGenerativePart(imageToAnalyze!)];
     const analysisPrompt = `Analyze the provided scene image for lighting, composition, color palette, camera details, and depth. The user's goal is: "${prompt}".`;
     parts.unshift({ text: analysisPrompt });
     
-    return callGeminiAPI<any>('gemini-2.5-pro', parts, sceneAnalysisSchema);
+    const modelName = getModelName(modelSelection);
+    return callGeminiAPI<any>(modelName, parts, sceneAnalysisSchema);
 };
 
 export const performComprehensiveAnalysis = async (
@@ -257,7 +316,9 @@ export const performComprehensiveAnalysis = async (
   referenceImage: FileWithPreview | null,
   outfitImage: FileWithPreview | null,
   sceneSource: SceneSource,
-  prompt: string
+  prompt: string,
+  subjectModel: AnalysisModelSelection,
+  sceneModel: AnalysisModelSelection
 ): Promise<{ data: ComprehensiveAnalysisData, isCached: boolean }> => {
   const cacheKeyFiles = [subjectImage, sceneImage, referenceImage, outfitImage].filter(Boolean);
   const cached = cacheService.getComprehensive<ComprehensiveAnalysisData>(cacheKeyFiles);
@@ -265,12 +326,11 @@ export const performComprehensiveAnalysis = async (
 
   console.log("[GeminiService] Starting Micro-Analysis Pipeline...");
 
-  const subjectPromise = analyzeSubject(subjectImage, outfitImage);
-  const scenePromise = analyzeScene(sceneImage, referenceImage, sceneSource, prompt);
+  const subjectPromise = analyzeSubject(subjectImage, outfitImage, subjectModel);
+  const scenePromise = analyzeScene(sceneImage, referenceImage, sceneSource, prompt, sceneModel);
 
   const [subjectData, sceneData] = await Promise.all([subjectPromise, scenePromise]);
   
-  // Merge the results into the final comprehensive data structure
   const mergedData: ComprehensiveAnalysisData = {
     ...subjectData,
     ...sceneData
@@ -281,12 +341,12 @@ export const performComprehensiveAnalysis = async (
   return { data: mergedData, isCached: false };
 };
 
-
-// --- Secondary Analysis Functions (Unchanged) ---
+// --- Secondary Analysis Functions ---
 
 export const getVFXSuggestions = async (
   sceneImage: FileWithPreview,
-  primaryData: ComprehensiveAnalysisData
+  primaryData: ComprehensiveAnalysisData,
+  modelSelection: AnalysisModelSelection
 ): Promise<{ data: VFXSuggestions, isCached: boolean }> => {
   const cached = cacheService.getVFX(sceneImage);
   if (cached) return cached;
@@ -299,7 +359,8 @@ export const getVFXSuggestions = async (
     Suggest one 'smart interaction' point for a subject (e.g., "leaning against the railing") and a refined lighting suggestion to enhance realism.`
   };
 
-  const data = await callGeminiAPI<VFXSuggestions>('gemini-2.5-pro', [scenePart, textPart], vfxSchema);
+  const modelName = getModelName(modelSelection);
+  const data = await callGeminiAPI<VFXSuggestions>(modelName, [scenePart, textPart], vfxSchema);
   cacheService.setVFX(sceneImage, data);
   return { data, isCached: false };
 };
@@ -307,7 +368,8 @@ export const getVFXSuggestions = async (
 export const adaptPoseForInteraction = async (
   subjectImage: FileWithPreview,
   originalPose: string,
-  interactionDescription: string
+  interactionDescription: string,
+  modelSelection: AnalysisModelSelection
 ): Promise<{ data: PoseAdaptationData, isCached: boolean }> => {
     const cached = cacheService.getPoseAdaptation(subjectImage, interactionDescription);
     if (cached) return cached;
@@ -315,7 +377,8 @@ export const adaptPoseForInteraction = async (
     const subjectPart = await fileToGenerativePart(subjectImage);
     const textPart = { text: `The subject's current pose is: "${originalPose}". Adapt this pose to realistically interact with this element: "${interactionDescription}". Describe the new pose and provide a confidence score.` };
 
-    const data = await callGeminiAPI<PoseAdaptationData>('gemini-2.5-pro', [subjectPart, textPart], poseSchema);
+    const modelName = getModelName(modelSelection);
+    const data = await callGeminiAPI<PoseAdaptationData>(modelName, [subjectPart, textPart], poseSchema);
     cacheService.setPoseAdaptation(subjectImage, interactionDescription, data);
     return { data, isCached: false };
 };
@@ -323,20 +386,23 @@ export const adaptPoseForInteraction = async (
 export const generateShadowDescription = async (
   adaptedPose: string,
   interaction: string,
-  lighting: string
+  lighting: string,
+  modelSelection: AnalysisModelSelection
 ): Promise<{ data: ShadowCastingData, isCached: boolean }> => {
     const cached = cacheService.getShadowData(adaptedPose, interaction);
     if (cached) return cached;
 
     const textPart = { text: `A subject is in this pose: "${adaptedPose}", interacting with "${interaction}". The scene lighting is: "${lighting}". Describe the shadow the subject should cast, including its direction and softness (hard, soft, or diffuse).` };
     
-    const data = await callGeminiAPI<ShadowCastingData>('gemini-2.5-pro', [textPart], shadowSchema);
+    const modelName = getModelName(modelSelection);
+    const data = await callGeminiAPI<ShadowCastingData>(modelName, [textPart], shadowSchema);
     cacheService.setShadowData(adaptedPose, interaction, data);
     return { data, isCached: false };
 };
 
 export const analyzeScenePerspective = async (
-  sceneImage: FileWithPreview
+  sceneImage: FileWithPreview,
+  modelSelection: AnalysisModelSelection
 ): Promise<{ data: PerspectiveAnalysisData, isCached: boolean }> => {
     const cached = cacheService.getPerspective(sceneImage);
     if (cached) return cached;
@@ -344,15 +410,16 @@ export const analyzeScenePerspective = async (
     const scenePart = await fileToGenerativePart(sceneImage);
     const textPart = { text: "Analyze the perspective, vanishing point, and relative scale of this scene. Provide a recommended scale factor (as a float, e.g., 0.85) for a human subject to be realistically placed within it. A scale of 1.0 means the subject is at a neutral middle-ground depth." };
 
-    const data = await callGeminiAPI<PerspectiveAnalysisData>('gemini-2.5-pro', [scenePart, textPart], perspectiveSchema);
+    const modelName = getModelName(modelSelection);
+    const data = await callGeminiAPI<PerspectiveAnalysisData>(modelName, [scenePart, textPart], perspectiveSchema);
     cacheService.setPerspective(sceneImage, data);
     return { data, isCached: false };
 };
 
-// [PENAMBAHAN BARU] Photometric Analysis Engine
 export const performPhotometricAnalysis = async (
   sceneImage: FileWithPreview,
-  primaryLightingDescription: string
+  primaryLightingDescription: string,
+  modelSelection: AnalysisModelSelection
 ): Promise<{ data: PhotometricAnalysisData, isCached: boolean }> => {
     const cached = cacheService.getPhotometricData(sceneImage);
     if (cached) return cached;
@@ -367,11 +434,11 @@ export const performPhotometricAnalysis = async (
     Fill the provided JSON schema with precise, actionable details.` 
     };
 
-    const data = await callGeminiAPI<PhotometricAnalysisData>('gemini-2.5-pro', [scenePart, textPart], photometricSchema);
+    const modelName = getModelName(modelSelection);
+    const data = await callGeminiAPI<PhotometricAnalysisData>(modelName, [scenePart, textPart], photometricSchema);
     cacheService.setPhotometricData(sceneImage, data);
     return { data, isCached: false };
 };
-
 
 export const generateFinalImage = async (
   finalPrompt: string,
@@ -395,18 +462,14 @@ export const generateFinalImage = async (
   return callGeminiImageAPI(parts);
 };
 
-// [PENAMBAHAN BARU] Post-Generation Harmonization Engine
 export const performHarmonization = async (
   baseImageSrc: string,
   analysisData: ComprehensiveAnalysisData
 ): Promise<string> => {
   console.log("[GeminiService] Starting Post-Generation Harmonization...");
-
-  // 1. Convert the base image data URL to a Blob, then to a GenerativePart
   const imageBlob = await (await fetch(baseImageSrc)).blob();
   const imagePart = await fileToGenerativePart(imageBlob);
 
-  // 2. Construct the detailed harmonization prompt
   const harmonizationPrompt = `
 You are an expert digital post-production artist. Your task is to subtly harmonize the subject within the provided image with their environment. Do not make drastic changes.
 
@@ -424,10 +487,8 @@ The final output must be only the enhanced, photorealistic image. It should look
   `;
   const textPart = { text: harmonizationPrompt };
 
-  // 3. Call the image generation API with the harmonization instructions
   return callGeminiImageAPI([textPart, imagePart]);
 };
-
 
 export const generateObjectMask = async (
   sceneImage: FileWithPreview,

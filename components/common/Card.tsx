@@ -1,5 +1,6 @@
 import React from 'react';
 import { Tooltip } from './Tooltip';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { TooltipIcon } from '../icons/Icons';
 
 interface CardProps {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import type { Landmark, ComprehensiveAnalysisData } from '../types';
 
 interface FacialVectorState {
@@ -9,10 +9,9 @@ interface FacialVectorState {
 }
 
 /**
- * This hook is designed to manage the state for the facial vector analysis display.
- * In the current architecture, it doesn't perform its own API calls. Instead,
- * it should be updated by the main App component after the primary 
- * comprehensive analysis is complete, which already contains the landmark data.
+ * RE-ENGINEERED: This hook now returns a stable `handlers` object to prevent
+ * causing infinite re-render loops in parent components that use it as a
+ * dependency in `useEffect`.
  */
 export const useFacialVectorAnalysis = () => {
   const [state, setState] = useState<FacialVectorState>({
@@ -62,11 +61,17 @@ export const useFacialVectorAnalysis = () => {
     });
   }, []);
 
-  return {
-    ...state,
+  // By memoizing the handlers object, we ensure it has a stable reference,
+  // which is critical for useEffect dependency arrays in parent components.
+  const handlers = useMemo(() => ({
     handleAnalysisStart,
     handleAnalysisSuccess,
     handleAnalysisError,
     reset,
+  }), [handleAnalysisStart, handleAnalysisSuccess, handleAnalysisError, reset]);
+
+  return {
+    state,
+    handlers,
   };
 };

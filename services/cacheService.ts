@@ -61,6 +61,7 @@ class CacheService {
       console.log(`[CacheService] HIT: Found VFX data for key: ${key}`);
       return { data, isCached: true };
     }
+    console.log(`[CacheService] MISS: No VFX data for key: ${key}`);
     return null;
   }
   public setVFX(sceneImage: FileWithPreview, data: VFXSuggestions): void {
@@ -77,6 +78,7 @@ class CacheService {
       console.log(`[CacheService] HIT: Found pose data for key: ${key}`);
       return { data, isCached: true };
     }
+    console.log(`[CacheService] MISS: No pose data for key: ${key}`);
     return null;
   }
   public setPoseAdaptation(subjectImage: FileWithPreview, interactionText: string, data: PoseAdaptationData): void {
@@ -93,6 +95,7 @@ class CacheService {
       console.log(`[CacheService] HIT: Found shadow data for key: ${key}`);
       return { data, isCached: true };
     }
+    console.log(`[CacheService] MISS: No shadow data for key: ${key}`);
     return null;
   }
   public setShadowData(poseText: string, interactionText: string, data: ShadowCastingData): void {
@@ -109,6 +112,7 @@ class CacheService {
       console.log(`[CacheService] HIT: Found perspective data for key: ${key}`);
       return { data, isCached: true };
     }
+    console.log(`[CacheService] MISS: No perspective data for key: ${key}`);
     return null;
   }
   public setPerspective(sceneImage: FileWithPreview, data: PerspectiveAnalysisData): void {
@@ -125,6 +129,7 @@ class CacheService {
       console.log(`[CacheService] HIT: Found photometric data for key: ${key}`);
       return { data, isCached: true };
     }
+    console.log(`[CacheService] MISS: No photometric data for key: ${key}`);
     return null;
   }
   public setPhotometricData(sceneImage: FileWithPreview, data: PhotometricAnalysisData): void {

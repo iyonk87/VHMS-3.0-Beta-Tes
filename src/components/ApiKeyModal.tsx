@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { KeyIcon } from '../../components/icons/Icons';
 
 interface ApiKeyModalProps {

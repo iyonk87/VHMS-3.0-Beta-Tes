@@ -1,5 +1,6 @@
 import React from 'react';
 import type { VerificationResult } from '../types';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { ShieldCheckIcon, CheckCircleIcon, XCircleIcon, InfoCircleIcon } from './icons/Icons';
 
 interface VerificationModalProps {

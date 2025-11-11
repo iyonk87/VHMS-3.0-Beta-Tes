@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+// FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { CropIcon } from './icons/Icons';
 
 interface CropModalProps {
