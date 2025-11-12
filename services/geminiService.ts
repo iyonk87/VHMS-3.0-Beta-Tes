@@ -45,9 +45,23 @@ async function generateContentWithRotation(promptBody: any) {
     const result = await response.json();
 
     if (!response.ok) {
-        // Ini akan menampilkan error yang dikembalikan dari server/proxy
-        const errorMessage = result.details || result.error || 'Terjadi Kesalahan Proxy: Gagal Menghubungi Server.';
-        throw new Error(errorMessage);
+        // Logika penanganan error yang disempurnakan untuk mengekstrak pesan yang benar.
+        let finalErrorMessage = 'Terjadi Kesalahan Proxy: Gagal Menghubungi Server.';
+        if (result) {
+            // Path untuk struktur error Google: { error: { message: '...' } }
+            if (result.error && typeof result.error.message === 'string') {
+                finalErrorMessage = result.error.message;
+            } 
+            // Path untuk struktur error kustom dari proxy: { details: '...' }
+            else if (typeof result.details === 'string') {
+                finalErrorMessage = result.details;
+            }
+            // Fallback jika strukturnya hanya { error: '...' }
+            else if (typeof result.error === 'string') {
+                finalErrorMessage = result.error;
+            }
+        }
+        throw new Error(finalErrorMessage);
     }
     
     return result;
