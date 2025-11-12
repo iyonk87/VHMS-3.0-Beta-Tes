@@ -319,6 +319,9 @@ const analyzeScene = async (
     return callGeminiAPI<any>(modelName, parts, sceneAnalysisSchema);
 };
 
+// Helper function to add a delay
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const performComprehensiveAnalysis = async (
   subjectImage: FileWithPreview,
   sceneImage: FileWithPreview | null,
@@ -333,10 +336,15 @@ export const performComprehensiveAnalysis = async (
   const cached = cacheService.getComprehensive<ComprehensiveAnalysisData>(cacheKeyFiles);
   if (cached) return { data: cached, isCached: true };
 
-  console.log("[GeminiService] Starting Sequential Micro-Analysis Pipeline...");
+  console.log("[GeminiService] Starting Sequential Micro-Analysis Pipeline with Staggering...");
 
   // Run analyses sequentially to avoid rate limiting on initial burst.
   const subjectData = await analyzeSubject(subjectImage, outfitImage, subjectModel);
+  
+  // PATCH: Add a 1.1-second delay to respect the 60 RPM free tier limit (1 req/sec).
+  console.log("[GeminiService] Staggering API calls... waiting 1100ms.");
+  await sleep(1100);
+  
   const sceneData = await analyzeScene(sceneImage, referenceImage, sceneSource, prompt, sceneModel);
 
   const mergedData: ComprehensiveAnalysisData = {

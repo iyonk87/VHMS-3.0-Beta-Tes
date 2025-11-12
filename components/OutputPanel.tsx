@@ -10,9 +10,8 @@ interface OutputPanelProps {
   outputImage: string | null;
   appStatus: AppStatus;
   statusMessage: string;
-  onGenerate: () => void;
-  onVerify: () => void;
-  canGenerate: boolean;
+  onStartGeneration: () => void;
+  isBusy: boolean;
   error: string | null;
   onStartEditing: () => void;
   consistencyWarning: string | null;
@@ -26,9 +25,8 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
   outputImage,
   appStatus,
   statusMessage,
-  onGenerate,
-  onVerify,
-  canGenerate,
+  onStartGeneration,
+  isBusy,
   error,
   onStartEditing,
   consistencyWarning,
@@ -39,7 +37,6 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
 }) => {
   const isAnalyzing = appStatus.startsWith('ANALYZING');
   const isGenerating = appStatus === 'GENERATING_IMAGE' || appStatus === 'HARMONIZING';
-  const isBusy = !['IDLE', 'DONE', 'ERROR'].includes(appStatus);
 
   const getButtonText = () => {
     if (appStatus === 'VERIFYING') return 'Memverifikasi...';
@@ -108,7 +105,7 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
             <div className="text-center text-slate-500 p-4">
               <GenerateIcon className="w-12 h-12 mx-auto opacity-30" />
               <p className="mt-2 font-semibold">Hasil Gambar Komposit</p>
-              <p className="text-xs mt-1">Jalankan Analisis dan Prompt Engine, lalu klik "Mulai Generasi".</p>
+              <p className="text-xs mt-1">Lengkapi input dan klik "Mulai Generasi".</p>
             </div>
           )}
           {outputImage && !isGenerating && !isAnalyzing && !error && (
@@ -148,24 +145,14 @@ export const OutputPanel: React.FC<OutputPanelProps> = ({
           sceneSource={sceneSource}
         />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <button
-            onClick={onVerify}
-            disabled={isBusy}
-            className="w-full bg-slate-700 border border-slate-600 text-slate-200 font-semibold py-2 px-4 rounded-md hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-          >
-            <ShieldCheckIcon className="w-5 h-5" />
-            Verifikasi Input
-          </button>
-          <button
-            onClick={onGenerate}
-            disabled={!canGenerate || isBusy}
-            className="w-full bg-amber-500 text-slate-900 font-semibold py-2 px-4 rounded-md hover:bg-amber-600 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-          >
-            <GenerateIcon className="w-5 h-5" />
-            {getButtonText()}
-          </button>
-        </div>
+        <button
+          onClick={onStartGeneration}
+          disabled={isBusy}
+          className="w-full bg-amber-500 text-slate-900 font-semibold py-2 px-4 rounded-md hover:bg-amber-600 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+        >
+          <GenerateIcon className="w-5 h-5" />
+          {getButtonText()}
+        </button>
       </div>
     </Card>
   );
