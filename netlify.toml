@@ -1,0 +1,3 @@
+[build]
+  # Ini adalah folder tempat Netlify akan mencari kode serverless Anda
+  functions = "netlify/functions"
