@@ -1,4 +1,4 @@
-import { GoogleGenAI, Modality, Part, Type } from "@google/genai";
+import { Modality, Part, Type } from "@google/genai";
 import type {
   ComprehensiveAnalysisData,
   FileWithPreview,
@@ -27,33 +27,32 @@ const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string
   return { inlineData: { data: await base64EncodedDataPromise, mimeType } };
 };
 
-const getGenAI = () => {
-    // STRATEGI GANDA (BILINGUAL) UNTUK STABILITAS MAKSIMAL:
-    // 1. Coba metode Vite standar terlebih dahulu (import.meta.env). Ini berfungsi untuk pengembangan lokal
-    //    dengan file .env dan platform hosting web modern (Vercel, Netlify).
-    let apiKey: string | undefined;
-    try {
-      apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
-    } catch (e) {
-      // Abaikan error jika import.meta tidak tersedia
-    }
+// URL Netlify Function Anda
+// Nama fungsi Anda adalah 'gemini-proxy', jadi URL-nya otomatis '/.netlify/functions/gemini-proxy'
+const PROXY_URL = '/.netlify/functions/gemini-proxy'; 
 
-    // 2. Jika metode Vite gagal, coba metode standar platform/backend (process.env).
-    //    Ini untuk kompatibilitas mundur dengan lingkungan seperti AI Studio.
-    if (!apiKey && typeof process !== 'undefined' && process.env) {
-        apiKey = (process.env as any).API_KEY;
-    }
+async function generateContentWithRotation(promptBody: any) {
+    // Kita mengirim BODY PROMPT ke server (Netlify Function)
+    const response = await fetch(PROXY_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        // Kita bungkus body prompt Anda di sini agar fungsi server bisa mengambilnya
+        body: JSON.stringify({ promptBody: promptBody }), 
+    });
 
-    // 3. Periksa apakah kunci API ditemukan.
-    if (!apiKey) {
-        console.error("FATAL: VITE_GEMINI_API_KEY tidak ditemukan atau kosong. Aplikasi tidak dapat berfungsi.");
-        // Kita teruskan placeholder agar error bisa ditangkap dengan baik oleh interceptor di bawah.
-        return new GoogleGenAI({ apiKey: "FATAL_NO_API_KEY_FOUND" });
+    const result = await response.json();
+
+    if (!response.ok) {
+        // Ini akan menampilkan error yang dikembalikan dari server/proxy
+        const errorMessage = result.details || result.error || 'Terjadi Kesalahan Proxy: Gagal Menghubungi Server.';
+        throw new Error(errorMessage);
     }
     
-    // 4. Jika kunci ditemukan, inisialisasi GenAI.
-    return new GoogleGenAI({ apiKey });
-};
+    return result;
+}
+
 
 // --- Error Interceptor ---
 const handleGeminiError = (error: any): never => {
@@ -203,25 +202,21 @@ const photometricSchema = {
 
 // --- Generic API Call Helpers ---
 
-const getModelName = (selection: AnalysisModelSelection): string => {
-  return selection === 'Pro' ? 'gemini-2.5-pro' : 'gemini-flash-latest';
-};
-
-async function callGeminiAPI<T>(modelName: string, promptParts: Part[], schema: object): Promise<T> {
+async function callGeminiAPI<T>(promptParts: Part[], schema: object): Promise<T> {
   try {
-    const ai = getGenAI();
-    console.log(`[GeminiService] Calling model ${modelName} for JSON output...`);
+    console.log(`[GeminiService] Calling proxy for JSON output...`);
   
-    const response = await ai.models.generateContent({
-      model: modelName,
+    const promptBody = {
       contents: { parts: promptParts },
-      config: {
+      generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: schema as any,
+        responseSchema: schema,
       },
-    });
+    };
 
-    const jsonText = response.text.trim();
+    const result = await generateContentWithRotation(promptBody);
+
+    const jsonText = result.candidates[0].content.parts[0].text.trim();
     const cleanedJson = jsonText.replace(/^```json\s*|```\s*$/g, '');
     return JSON.parse(cleanedJson) as T;
 
@@ -233,19 +228,18 @@ async function callGeminiAPI<T>(modelName: string, promptParts: Part[], schema: 
 
 async function callGeminiImageAPI(promptParts: Part[]): Promise<string> {
   try {
-    const ai = getGenAI();
-    const model = 'gemini-2.5-flash-image';
-    console.log(`[GeminiService] Calling model ${model} for image output with ${promptParts.length} parts...`);
-
-    const response = await ai.models.generateContent({
-      model,
+    console.log(`[GeminiService] Calling proxy for image output with ${promptParts.length} parts...`);
+    
+    const promptBody = {
       contents: { parts: promptParts },
-      config: {
+      generationConfig: {
         responseModalities: [Modality.IMAGE],
       },
-    });
+    };
 
-    for (const part of response.candidates[0].content.parts) {
+    const result = await generateContentWithRotation(promptBody);
+
+    for (const part of result.candidates[0].content.parts) {
       if (part.inlineData) {
         const base64ImageBytes: string = part.inlineData.data;
         return `data:${part.inlineData.mimeType};base64,${base64ImageBytes}`;
@@ -274,8 +268,7 @@ const analyzeSubject = async (
         prompt += "\nA second image is provided as an outfit reference. Describe this outfit for the subject.";
     }
     parts.unshift({ text: prompt });
-    const modelName = getModelName(modelSelection);
-    return callGeminiAPI<any>(modelName, parts, subjectAnalysisSchema);
+    return callGeminiAPI<any>(parts, subjectAnalysisSchema);
 };
 
 const analyzeScene = async (
@@ -306,8 +299,7 @@ const analyzeScene = async (
     const analysisPrompt = `Analyze the provided scene image for lighting, composition, color palette, camera details, and depth. The user's goal is: "${prompt}".`;
     parts.unshift({ text: analysisPrompt });
     
-    const modelName = getModelName(modelSelection);
-    return callGeminiAPI<any>(modelName, parts, sceneAnalysisSchema);
+    return callGeminiAPI<any>(parts, sceneAnalysisSchema);
 };
 
 export const performComprehensiveAnalysis = async (
@@ -358,8 +350,7 @@ export const getVFXSuggestions = async (
     Suggest one 'smart interaction' point for a subject (e.g., "leaning against the railing") and a refined lighting suggestion to enhance realism.`
   };
 
-  const modelName = getModelName(modelSelection);
-  const data = await callGeminiAPI<VFXSuggestions>(modelName, [scenePart, textPart], vfxSchema);
+  const data = await callGeminiAPI<VFXSuggestions>([scenePart, textPart], vfxSchema);
   cacheService.setVFX(sceneImage, data);
   return { data, isCached: false };
 };
@@ -376,8 +367,7 @@ export const adaptPoseForInteraction = async (
     const subjectPart = await fileToGenerativePart(subjectImage);
     const textPart = { text: `The subject's current pose is: "${originalPose}". Adapt this pose to realistically interact with this element: "${interactionDescription}". Describe the new pose and provide a confidence score.` };
 
-    const modelName = getModelName(modelSelection);
-    const data = await callGeminiAPI<PoseAdaptationData>(modelName, [subjectPart, textPart], poseSchema);
+    const data = await callGeminiAPI<PoseAdaptationData>([subjectPart, textPart], poseSchema);
     cacheService.setPoseAdaptation(subjectImage, interactionDescription, data);
     return { data, isCached: false };
 };
@@ -393,8 +383,7 @@ export const generateShadowDescription = async (
 
     const textPart = { text: `A subject is in this pose: "${adaptedPose}", interacting with "${interaction}". The scene lighting is: "${lighting}". Describe the shadow the subject should cast, including its direction and softness (hard, soft, or diffuse).` };
     
-    const modelName = getModelName(modelSelection);
-    const data = await callGeminiAPI<ShadowCastingData>(modelName, [textPart], shadowSchema);
+    const data = await callGeminiAPI<ShadowCastingData>([textPart], shadowSchema);
     cacheService.setShadowData(adaptedPose, interaction, data);
     return { data, isCached: false };
 };
@@ -409,8 +398,7 @@ export const analyzeScenePerspective = async (
     const scenePart = await fileToGenerativePart(sceneImage);
     const textPart = { text: "Analyze the perspective, vanishing point, and relative scale of this scene. Provide a recommended scale factor (as a float, e.g., 0.85) for a human subject to be realistically placed within it. A scale of 1.0 means the subject is at a neutral middle-ground depth." };
 
-    const modelName = getModelName(modelSelection);
-    const data = await callGeminiAPI<PerspectiveAnalysisData>(modelName, [scenePart, textPart], perspectiveSchema);
+    const data = await callGeminiAPI<PerspectiveAnalysisData>([scenePart, textPart], perspectiveSchema);
     cacheService.setPerspective(sceneImage, data);
     return { data, isCached: false };
 };
@@ -433,8 +421,7 @@ export const performPhotometricAnalysis = async (
     Fill the provided JSON schema with precise, actionable details.` 
     };
 
-    const modelName = getModelName(modelSelection);
-    const data = await callGeminiAPI<PhotometricAnalysisData>(modelName, [scenePart, textPart], photometricSchema);
+    const data = await callGeminiAPI<PhotometricAnalysisData>([scenePart, textPart], photometricSchema);
     cacheService.setPhotometricData(sceneImage, data);
     return { data, isCached: false };
 };
