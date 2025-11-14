@@ -10,10 +10,16 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
       },
       plugins: [react()],
+      
+      // BAGIAN define DIHAPUS TOTAL KARENA MEMBUAT KUNCI API LAMA TER-BUNDLE.
+      // Kunci API baru kini hanya dibaca oleh Netlify Function (gemini-proxy.js).
+      /*
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
       },
+      */
+      
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
