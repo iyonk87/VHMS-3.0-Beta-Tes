@@ -28,31 +28,13 @@ const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string
 };
 
 const getGenAI = () => {
-    // STRATEGI GANDA (BILINGUAL) UNTUK STABILITAS MAKSIMAL:
-    // 1. Coba metode Vite standar terlebih dahulu (import.meta.env). Ini berfungsi untuk pengembangan lokal
-    //    dengan file .env dan platform hosting web modern (Vercel, Netlify).
-    let apiKey: string | undefined;
-    try {
-      apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
-    } catch (e) {
-      // Abaikan error jika import.meta tidak tersedia
-    }
-
-    // 2. Jika metode Vite gagal, coba metode standar platform/backend (process.env).
-    //    Ini untuk kompatibilitas mundur dengan lingkungan seperti AI Studio.
-    if (!apiKey && typeof process !== 'undefined' && process.env) {
-        apiKey = (process.env as any).API_KEY;
-    }
-
-    // 3. Periksa apakah kunci API ditemukan.
-    if (!apiKey) {
-        console.error("FATAL: VITE_GEMINI_API_KEY tidak ditemukan atau kosong. Aplikasi tidak dapat berfungsi.");
-        // Kita teruskan placeholder agar error bisa ditangkap dengan baik oleh interceptor di bawah.
-        return new GoogleGenAI({ apiKey: "FATAL_NO_API_KEY_FOUND" });
-    }
+    // START EDIT KRITIS: Hapus semua logika pencarian Kunci API di Frontend.
+    // Frontend tidak lagi membutuhkan Kunci API yang valid karena semua panggilan
+    // sudah diarahkan ke Netlify Proxy di backend.
     
-    // 4. Jika kunci ditemukan, inisialisasi GenAI.
-    return new GoogleGenAI({ apiKey });
+    // Gunakan placeholder yang aman untuk inisialisasi GoogleGenAI.
+    // Ini mencegah error inisialisasi di browser dan menjamin tidak ada kunci lama yang bocor.
+    return new GoogleGenAI({ apiKey: "FRONTEND_PROXY_SAFE_PLACEHOLDER" });
 };
 
 // --- Error Interceptor ---
@@ -61,9 +43,9 @@ const handleGeminiError = (error: any): never => {
 
   const errorMessage = error.message || JSON.stringify(error);
   
-  // 1. Tangani Error Kunci API Hilang/Invalid dengan pesan yang jelas
-  if (errorMessage.includes("API key") || errorMessage.includes("FATAL_NO_API_KEY_FOUND")) {
-       throw new Error("Kunci API tidak ditemukan. Pastikan VITE_GEMINI_API_KEY telah diatur dengan benar di environment variables Anda.");
+  // EDIT 1: Memperbaiki pesan error agar lebih relevan dengan setup Proxy.
+  if (errorMessage.includes("API key") || errorMessage.includes("FATAL_NO_API_KEY_FOUND") || errorMessage.includes("SAFE_PLACEHOLDER")) {
+       throw new Error("Kunci API tidak ditemukan atau tidak valid. Pastikan Kunci API telah diatur dengan benar di variabel environment Netlify (GEMINI_KEY_POOL).");
   }
 
   // 2. Tangani Error 429 (Resource Exhausted / Quota Exceeded)
@@ -74,8 +56,8 @@ const handleGeminiError = (error: any): never => {
     errorMessage.includes("RESOURCE_EXHAUSTED")
   ) {
     throw new Error(
-      "⚠️ Layanan Sedang Sibuk (Batas Kuota Gratis Tercapai).\n" +
-      "Terlalu banyak permintaan dalam waktu singkat. Mohon tunggu sekitar 30-60 detik agar kuota Anda pulih, lalu coba lagi. VHMS Team"
+      "⚠️ Layanan Sedang Sibuk (Batas Kuota Tim Tercapai).\n" +
+      "Rotasi kunci API tim gagal menemukan kunci yang tersedia. Mohon tunggu 30-60 detik dan coba lagi. VHMS Team"
     );
   }
 
@@ -83,7 +65,7 @@ const handleGeminiError = (error: any): never => {
 };
 
 // --- Schemas for Reliable JSON Output ---
-
+// ... (Bagian Schemas tetap sama) ...
 const subjectAnalysisSchema = {
     type: Type.OBJECT,
     properties: {
@@ -201,6 +183,7 @@ const photometricSchema = {
     required: ['keyLight', 'fillLight', 'rimLight', 'ambientBounceLight', 'globalMood'],
 };
 
+
 // --- Generic API Call Helpers ---
 
 const getModelName = (selection: AnalysisModelSelection): string => {
@@ -270,7 +253,7 @@ async function callGeminiImageAPI(promptParts: Part[]): Promise<string> {
 }
 
 // --- Primary Analysis Pipeline ---
-
+// ... (Semua fungsi di bawah ini tetap sama) ...
 const analyzeSubject = async (
     subjectImage: FileWithPreview, 
     outfitImage: FileWithPreview | null,
