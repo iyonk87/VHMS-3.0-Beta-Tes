@@ -28,6 +28,7 @@ const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string
 };
 
 const PROXY_URL = '/.netlify/functions/gemini-proxy'; 
+const STABLE_IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 async function callProxy(promptBody: any, modelName: string) {
     const response = await fetch(PROXY_URL, {
@@ -496,7 +497,7 @@ export const generateFinalImage = async (
   // The text prompt should be the first part in the array for many multi-modal models.
   parts.unshift({ text: augmentedPrompt });
 
-  return callGeminiImageAPI('gemini-2.5-flash-image', parts);
+  return callGeminiImageAPI(STABLE_IMAGE_MODEL, parts);
 };
 
 export const performHarmonization = async (
@@ -524,7 +525,7 @@ The final output must be only the enhanced, photorealistic image. It should look
   `;
   const textPart = { text: harmonizationPrompt };
 
-  return callGeminiImageAPI('gemini-2.5-flash-image', [textPart, imagePart]);
+  return callGeminiImageAPI(STABLE_IMAGE_MODEL, [textPart, imagePart]);
 };
 
 export const generateObjectMask = async (
@@ -534,7 +535,7 @@ export const generateObjectMask = async (
   const scenePart = await fileToGenerativePart(sceneImage);
   const textPart = { text: `Generate a black and white segmentation mask for the following object in the image: "${occlusionSuggestion}". The object(s) of interest MUST be solid white (#FFFFFF) and the entire background MUST be solid black (#000000). Do not include any shades of gray, text, or other elements. The output must be only the binary mask.` };
   
-  return callGeminiImageAPI('gemini-2.5-flash-image', [scenePart, textPart]);
+  return callGeminiImageAPI(STABLE_IMAGE_MODEL, [scenePart, textPart]);
 };
 
 export const performInpainting = async (
@@ -549,5 +550,5 @@ export const performInpainting = async (
   const maskPart = await fileToGenerativePart(maskBlob, 'image/png'); 
   const textPart = { text: `You are an expert inpainting model. Use the second image as a mask. The white areas of the mask indicate the region to modify in the first image. Fill the masked region according to this instruction: "${inpaintPrompt}". The result should be seamless and photorealistic.` };
 
-  return callGeminiImageAPI('gemini-2.5-flash-image', [imagePart, maskPart, textPart]);
+  return callGeminiImageAPI(STABLE_IMAGE_MODEL, [imagePart, maskPart, textPart]);
 };
