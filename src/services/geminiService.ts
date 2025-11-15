@@ -11,6 +11,7 @@ import type {
   AnalysisModelSelection
 } from '../types';
 import { cacheService } from './cacheService';
+import { config } from './configService'; // IMPORT: Import the new centralized config.
 
 // Helper to convert File object to a base64 string for the API.
 const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string): Promise<Part> => {
@@ -28,7 +29,7 @@ const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string
 };
 
 const PROXY_URL = '/.netlify/functions/gemini-proxy'; 
-const STABLE_IMAGE_MODEL = 'gemini-2.5-flash-image';
+// REMOVED: Model name constant is no longer needed here.
 
 async function callProxy(promptBody: any, modelName: string) {
     const response = await fetch(PROXY_URL, {
@@ -210,7 +211,8 @@ const photometricSchema = {
 // --- Generic API Call Helpers ---
 
 const getModelName = (selection: AnalysisModelSelection): string => {
-  return selection === 'Pro' ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
+  // REFACTOR: Use the centralized config service instead of reading env variables directly.
+  return selection === 'Pro' ? config.models.pro : config.models.fast;
 };
 
 async function callGeminiAPI<T>(modelName: string, promptParts: Part[], schema: object): Promise<T> {
@@ -497,7 +499,8 @@ export const generateFinalImage = async (
   // The text prompt should be the first part in the array for many multi-modal models.
   parts.unshift({ text: augmentedPrompt });
 
-  return callGeminiImageAPI(STABLE_IMAGE_MODEL, parts);
+  // REFACTOR: Use the centralized config for the image model.
+  return callGeminiImageAPI(config.models.image, parts);
 };
 
 export const performHarmonization = async (
@@ -525,7 +528,8 @@ The final output must be only the enhanced, photorealistic image. It should look
   `;
   const textPart = { text: harmonizationPrompt };
 
-  return callGeminiImageAPI(STABLE_IMAGE_MODEL, [textPart, imagePart]);
+  // REFACTOR: Use the centralized config for the image model.
+  return callGeminiImageAPI(config.models.image, [textPart, imagePart]);
 };
 
 export const generateObjectMask = async (
@@ -535,7 +539,8 @@ export const generateObjectMask = async (
   const scenePart = await fileToGenerativePart(sceneImage);
   const textPart = { text: `Generate a black and white segmentation mask for the following object in the image: "${occlusionSuggestion}". The object(s) of interest MUST be solid white (#FFFFFF) and the entire background MUST be solid black (#000000). Do not include any shades of gray, text, or other elements. The output must be only the binary mask.` };
   
-  return callGeminiImageAPI(STABLE_IMAGE_MODEL, [scenePart, textPart]);
+  // REFACTOR: Use the centralized config for the image model.
+  return callGeminiImageAPI(config.models.image, [scenePart, textPart]);
 };
 
 export const performInpainting = async (
@@ -550,5 +555,6 @@ export const performInpainting = async (
   const maskPart = await fileToGenerativePart(maskBlob, 'image/png'); 
   const textPart = { text: `You are an expert inpainting model. Use the second image as a mask. The white areas of the mask indicate the region to modify in the first image. Fill the masked region according to this instruction: "${inpaintPrompt}". The result should be seamless and photorealistic.` };
 
-  return callGeminiImageAPI(STABLE_IMAGE_MODEL, [imagePart, maskPart, textPart]);
+  // REFACTOR: Use the centralized config for the image model.
+  return callGeminiImageAPI(config.models.image, [imagePart, maskPart, textPart]);
 };
