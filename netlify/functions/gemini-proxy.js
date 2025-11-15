@@ -1,12 +1,12 @@
 // File: netlify/functions/gemini-proxy.js
 
-// [ENHANCEMENT] Import crypto for unique request IDs
-import { randomUUID } from 'crypto';
-// [REFACTOR] Import the official Google GenAI SDK
-import { GoogleGenAI } from '@google/genai';
+// [FIX] Using CommonJS 'require' syntax as the Netlify runtime seems to expect it,
+// which resolves the "Cannot find module" error.
+const { randomUUID } = require('crypto');
+const { GoogleGenAI } = require('@google/genai');
 
 
-export const handler = async (event) => {
+exports.handler = async (event) => {
     // [LOGGING] Generate a unique ID for this request for traceability.
     const requestId = randomUUID();
     
