@@ -108,3 +108,7 @@ export const ChevronDown: React.FC<IconProps> = (props) => (
 export const ChevronRight: React.FC<IconProps> = (props) => (
     <svg {...defaultProps} {...props}><polyline points="9 18 15 12 9 6"></polyline></svg>
 );
+// NEW ICON FOR PROXY STATUS
+export const ServerIcon: React.FC<IconProps> = (props) => (
+    <svg {...defaultProps} {...props}><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+);

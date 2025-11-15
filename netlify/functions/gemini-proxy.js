@@ -1,109 +1,94 @@
-// netlify/functions/gemini-proxy.js
+// File: netlify/functions/gemini-proxy.js
 
-// Kunci-kunci API tim Anda disimpan di environment variable Netlify (sisi server)
-// Kita akan menyimpan ini di Netlify dengan nama 'GEMINI_KEY_POOL'
-const GEMINI_KEYS = process.env.GEMINI_KEY_POOL ? process.env.GEMINI_KEY_POOL.split(',').filter(k => k.trim() !== '') : [];
+// IMPORTANT: This proxy requires the 'node-fetch' package to be installed for Netlify functions.
+// Run: npm install node-fetch
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
-// Variabel untuk melacak kunci mana yang terakhir digunakan (Shared state)
-let keyIndex = 0;
 
-// Logika Round-Robin Rotation
-function getNextApiKey() {
-  if (GEMINI_KEYS.length === 0) {
-    // Tidak melempar error di sini, agar bisa ditangani di handler utama
-    return null;
-  }
-  
-  const key = GEMINI_KEYS[keyIndex];
-  
-  // Update index ke kunci berikutnya, kembali ke 0 jika sudah sampai di akhir array
-  keyIndex = (keyIndex + 1) % GEMINI_KEYS.length;
-  
-  return key;
-}
-
-// Handler utama untuk Netlify Function
 exports.handler = async (event) => {
-  // Pastikan metode adalah POST
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      body: JSON.stringify({ error: 'Method Not Allowed' }),
-    };
-  }
-
-  if (GEMINI_KEYS.length === 0) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Server Configuration Error', details: 'GEMINI_KEY_POOL environment variable not set or is empty on the server.' }),
-    };
-  }
-
-  try {
-    const data = JSON.parse(event.body);
-    let lastError = null;
-
-    // --- LOGIKA AUTO-RETRY ---
-    // Coba setiap kunci di pool sekali per permintaan.
-    for (let i = 0; i < GEMINI_KEYS.length; i++) {
-      const apiKey = getNextApiKey();
-      if (!apiKey) continue; // Seharusnya tidak terjadi jika pemeriksaan di atas lolos
-
-      // UPGRADE LOGGING: Sertakan 4 digit terakhir kunci untuk identifikasi yang mudah
-      const currentIndex = (keyIndex - 1 + GEMINI_KEYS.length) % GEMINI_KEYS.length;
-      const keyIdentifier = `...${apiKey.slice(-4)} (index ${currentIndex})`;
-
-      console.log(`[Proxy] Attempting call with key ${keyIdentifier}...`);
-
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-      
-      const response = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data.promptBody),
-      });
-
-      const result = await response.json();
-
-      // KASUS 1: Panggilan Berhasil
-      if (response.ok) {
-        console.log(`[Proxy] Call successful with key ${keyIdentifier}.`);
+    if (event.httpMethod !== 'POST') {
         return {
-          statusCode: 200,
-          body: JSON.stringify(result),
+            statusCode: 405,
+            body: JSON.stringify({ error: 'Method Not Allowed' }),
         };
-      }
-
-      // KASUS 2: Kunci API Tidak Valid, coba kunci berikutnya
-      if (response.status === 400 && result.error?.message?.includes('API key not valid')) {
-        console.warn(`[Proxy] Key ${keyIdentifier} is invalid. Trying next key...`);
-        lastError = result; // Simpan error terakhir untuk dilaporkan jika semua kunci gagal
-        continue; // Lanjutkan ke iterasi loop berikutnya
-      }
-      
-      // KASUS 3: Error Lain (mis. 429 Quota, 500 Server Error), langsung gagal
-      console.error(`[Proxy] Unrecoverable Google API Error with key ${keyIdentifier}. Aborting.`, result);
-      return {
-        statusCode: response.status,
-        body: JSON.stringify(result),
-      };
     }
 
-    // Jika loop selesai tanpa ada yang berhasil, berarti semua kunci gagal.
-    console.error('[Proxy] All API keys in the pool failed validation.');
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        error: 'All API keys in the pool are invalid.',
-        details: lastError || 'No successful response from API after trying all keys.'
-      }),
-    };
+    // 1. Dapatkan Kunci dari Environment Pool
+    const keyPoolString = process.env.GEMINI_KEY_POOL;
+    const KEY_POOL = keyPoolString ? keyPoolString.split(',').map(key => key.trim()).filter(key => key.length > 0) : [];
 
-  } catch (error) {
-    console.error('[Proxy] Internal function error.', error);
+    if (KEY_POOL.length === 0) {
+        console.error("[Proxy FATAL] GEMINI_KEY_POOL environment variable is empty or not set.");
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "FATAL: GEMINI_KEY_POOL environment variable is empty." }),
+        };
+    }
+    
+    // 2. Acak Urutan Kunci untuk Distribusi Beban
+    const shuffledKeys = [...KEY_POOL].sort(() => 0.5 - Math.random());
+
+    // 3. Persiapan Payload
+    let payload;
+    let modelName;
+    try {
+        const body = JSON.parse(event.body);
+        payload = body.promptBody; // The main payload for Google API
+        modelName = body.modelName; // The model name (e.g., 'gemini-2.5-flash')
+        if (!payload || !modelName) {
+            throw new Error("Request body must include 'promptBody' and 'modelName'.");
+        }
+    } catch (e) {
+        return { statusCode: 400, body: JSON.stringify({ error: "Invalid JSON payload.", details: e.message }) };
+    }
+
+    let lastError = null;
+
+    // 4. Loop Retry Kritis
+    for (const apiKey of shuffledKeys) {
+        const shortKey = `${apiKey.substring(0, 5)}...${apiKey.slice(-4)}`;
+        console.log(`[Proxy] Mencoba Kunci: ${shortKey}`);
+        
+        try {
+            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+            
+            const fetchResponse = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            
+            const responseText = await fetchResponse.text();
+
+            if (!fetchResponse.ok) {
+                // Throw an error to be caught by the catch block, triggering a retry with the next key.
+                throw new Error(`Google API Error (Status: ${fetchResponse.status}): ${responseText}`);
+            }
+            
+            // Berhasil!
+            console.log(`[Proxy] Berhasil menggunakan Kunci: ${shortKey}`);
+            return {
+                statusCode: 200,
+                headers: { 'Content-Type': 'application/json' },
+                body: responseText,
+            };
+            
+        } catch (error) {
+            // Gagal. Simpan error dan biarkan loop berlanjut untuk mencoba kunci berikutnya.
+            const errorMessage = error.message || JSON.stringify(error);
+            lastError = errorMessage;
+            
+            console.warn(`[Proxy] Kunci ${shortKey} gagal: ${errorMessage}`);
+        }
+    }
+    
+    // 5. Gagal Total
+    console.error("[Proxy FATAL] Semua kunci di pool gagal setelah percobaan.");
     return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Internal Server Error (Function Failed)', details: error.message }),
+        statusCode: 429, // "Too Many Requests" is a fitting error code for this situation.
+        body: JSON.stringify({
+            error: "Semua Kunci API di Pool Gagal atau Mencapai Batas Kuota.",
+            details: lastError || "Tidak ada detail error yang tersedia.",
+        }),
     };
-  }
 };

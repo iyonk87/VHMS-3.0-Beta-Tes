@@ -2,7 +2,8 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import type { 
     FileWithPreview, SceneSource, StylePreset, Resolution, AppStatus, VerificationResult,
     ComprehensiveAnalysisData, VFXSuggestions, PoseAdaptationData, ShadowCastingData, 
-    PerspectiveAnalysisData, PhotometricAnalysisData, SecondaryAnalysisModuleState, RegeneratableModule, HistoryItem, AnalysisModelsState, AnalysisModelSelection
+    PerspectiveAnalysisData, PhotometricAnalysisData, SecondaryAnalysisModuleState, RegeneratableModule, HistoryItem, AnalysisModelsState, AnalysisModelSelection,
+    ProxyStatus
 } from '../types';
 
 import { InputPanel } from '../components/InputPanel';
@@ -12,11 +13,8 @@ import { MaskEditor } from '../components/MaskEditor';
 import { InpaintEditor } from '../components/InpaintEditor';
 import { ApiKeyProvider } from './ApiKeyContext';
 import { OutputPanel } from '../components/OutputPanel';
-// Panel-panel berikut tidak lagi di-render, namun hooks dan service-nya tetap digunakan.
 import { PromptEnginePanel } from '../components/PromptEnginePanel';
-// import { AnalysisPanel } from '../components/AnalysisPanel';
-// import { HistoryPanel } from '../components/HistoryPanel';
-// import { FacialVectorPanel } from '../components/FacialVectorPanel';
+import { ProxyStatusIndicator } from '../components/common/ProxyStatusIndicator';
 
 
 import * as geminiService from '../services/geminiService';
@@ -53,9 +51,11 @@ const App: React.FC = () => {
     const [statusMessage, setStatusMessage] = useState<string>('');
     const [error, setError] = useState<string | null>(null);
     const [consistencyWarning, setConsistencyWarning] = useState<string | null>(null);
+    const [proxyStatus, setProxyStatus] = useState<ProxyStatus>('IDLE');
     
     // 4. Analysis Data State
     const [analysisData, setAnalysisData] = useState<ComprehensiveAnalysisData | null>(null);
+    const [isPrimaryAnalysisCached, setIsPrimaryAnalysisCached] = useState<boolean>(false);
     const [vfxData, setVfxData] = useState<VFXSuggestions | null>(null);
     const [poseData, setPoseData] = useState<PoseAdaptationData | null>(null);
     const [shadowData, setShadowData] = useState<ShadowCastingData | null>(null);
@@ -81,7 +81,7 @@ const App: React.FC = () => {
     const [history, setHistory] = useState<HistoryItem[]>([]);
 
     // 7. Custom Hooks
-    const { state: facialVectorState, handlers: facialVectorHandlers } = useFacialVectorAnalysis();
+    const { handlers: facialVectorHandlers } = useFacialVectorAnalysis();
     
     // --- Memos and Derived State ---
     const isAnalyzing = useMemo(() => appStatus.startsWith('ANALYZING'), [appStatus]);
@@ -100,6 +100,7 @@ const App: React.FC = () => {
         setAppStatus('IDLE');
         setError(null);
         setAnalysisData(null);
+        setIsPrimaryAnalysisCached(false);
         setVfxData(null);
         setPoseData(null);
         setShadowData(null);
@@ -196,55 +197,73 @@ const App: React.FC = () => {
         let shadowRes: ShadowCastingData | null = null;
         let perspRes: PerspectiveAnalysisData | null = null;
         let photoRes: PhotometricAnalysisData | null = null;
-
-        setStatusMessage('Menganalisis: VFX & Interaksi...');
-        setSecondaryAnalysisState(s => ({ ...s, vfx: { ...s.vfx, loading: true } }));
-        const { data: vfxData, isCached: vfxCached } = await geminiService.getVFXSuggestions(imageForSecondary, primaryData, analysisModels.vfx);
-        vfxRes = vfxData;
-        setVfxData(vfxRes);
-        setSecondaryAnalysisState(s => ({ ...s, vfx: { loading: false, error: null, cached: vfxCached } }));
-        await sleep(250);
-
-        if (vfxRes.smartInteraction) {
-            setStatusMessage('Menganalisis: Adaptasi Pose...');
-            setSecondaryAnalysisState(s => ({ ...s, pose: { ...s.pose, loading: true } }));
-            const { data: poseData, isCached: poseCached } = await geminiService.adaptPoseForInteraction(subjectImage!, primaryData.subjectPose, vfxRes.smartInteraction.placementSuggestion, analysisModels.pose);
-            poseRes = poseData;
-            setPoseData(poseRes);
-            setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: poseCached } }));
+        
+        try {
+            setStatusMessage('Menganalisis: VFX & Interaksi...');
+            setSecondaryAnalysisState(s => ({ ...s, vfx: { ...s.vfx, loading: true } }));
+            setProxyStatus('PENDING');
+            const { data: vfxData, isCached: vfxCached } = await geminiService.getVFXSuggestions(imageForSecondary, primaryData, analysisModels.vfx);
+            vfxRes = vfxData;
+            setVfxData(vfxRes);
+            setSecondaryAnalysisState(s => ({ ...s, vfx: { loading: false, error: null, cached: vfxCached } }));
+            setProxyStatus('SUCCESS');
             await sleep(250);
 
-            setStatusMessage('Menganalisis: Bayangan...');
-            setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true } }));
-            const { data: shadowData, isCached: shadowCached } = await geminiService.generateShadowDescription(poseRes.adaptedPoseDescription, vfxRes.smartInteraction.placementSuggestion, primaryData.lighting, analysisModels.shadow);
-            shadowRes = shadowData;
-            setShadowData(shadowRes);
-            setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: shadowCached } }));
-        } else {
-            setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: false } }));
-            setStatusMessage('Menganalisis: Bayangan...');
-            setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true } }));
-            const { data: shadowData, isCached: shadowCached } = await geminiService.generateShadowDescription(primaryData.subjectPose, "No specific interaction", primaryData.lighting, analysisModels.shadow);
-            shadowRes = shadowData;
-            setShadowData(shadowRes);
-            setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: shadowCached } }));
+            if (vfxRes.smartInteraction) {
+                setStatusMessage('Menganalisis: Adaptasi Pose...');
+                setSecondaryAnalysisState(s => ({ ...s, pose: { ...s.pose, loading: true } }));
+                setProxyStatus('PENDING');
+                const { data: poseData, isCached: poseCached } = await geminiService.adaptPoseForInteraction(subjectImage!, primaryData.subjectPose, vfxRes.smartInteraction.placementSuggestion, analysisModels.pose);
+                poseRes = poseData;
+                setPoseData(poseRes);
+                setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: poseCached } }));
+                setProxyStatus('SUCCESS');
+                await sleep(250);
+
+                setStatusMessage('Menganalisis: Bayangan...');
+                setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true } }));
+                setProxyStatus('PENDING');
+                const { data: shadowData, isCached: shadowCached } = await geminiService.generateShadowDescription(poseRes.adaptedPoseDescription, vfxRes.smartInteraction.placementSuggestion, primaryData.lighting, analysisModels.shadow);
+                shadowRes = shadowData;
+                setShadowData(shadowRes);
+                setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: shadowCached } }));
+                setProxyStatus('SUCCESS');
+            } else {
+                setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: false } }));
+                setStatusMessage('Menganalisis: Bayangan...');
+                setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true } }));
+                setProxyStatus('PENDING');
+                const { data: shadowData, isCached: shadowCached } = await geminiService.generateShadowDescription(primaryData.subjectPose, "No specific interaction", primaryData.lighting, analysisModels.shadow);
+                shadowRes = shadowData;
+                setShadowData(shadowRes);
+                setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: shadowCached } }));
+                setProxyStatus('SUCCESS');
+            }
+            await sleep(250);
+
+            setStatusMessage('Menganalisis: Perspektif...');
+            setSecondaryAnalysisState(s => ({ ...s, perspective: { ...s.perspective, loading: true } }));
+            setProxyStatus('PENDING');
+            const { data: perspData, isCached: perspCached } = await geminiService.analyzeScenePerspective(imageForSecondary, analysisModels.perspective);
+            perspRes = perspData;
+            setPerspectiveData(perspRes);
+            setSecondaryAnalysisState(s => ({ ...s, perspective: { loading: false, error: null, cached: perspCached } }));
+            setProxyStatus('SUCCESS');
+            await sleep(250);
+
+            setStatusMessage('Menganalisis: Fotometrik...');
+            setSecondaryAnalysisState(s => ({ ...s, photometric: { ...s.photometric, loading: true } }));
+            setProxyStatus('PENDING');
+            const { data: photoData, isCached: photoCached } = await geminiService.performPhotometricAnalysis(imageForSecondary, primaryData.lighting, analysisModels.photometric);
+            photoRes = photoData;
+            setPhotometricData(photoRes);
+            setSecondaryAnalysisState(s => ({ ...s, photometric: { loading: false, error: null, cached: photoCached } }));
+            setProxyStatus('SUCCESS');
+
+        } catch(e) {
+            setProxyStatus('ERROR');
+            throw e; // Re-throw to be caught by the main handler
         }
-        await sleep(250);
-
-        setStatusMessage('Menganalisis: Perspektif...');
-        setSecondaryAnalysisState(s => ({ ...s, perspective: { ...s.perspective, loading: true } }));
-        const { data: perspData, isCached: perspCached } = await geminiService.analyzeScenePerspective(imageForSecondary, analysisModels.perspective);
-        perspRes = perspData;
-        setPerspectiveData(perspRes);
-        setSecondaryAnalysisState(s => ({ ...s, perspective: { loading: false, error: null, cached: perspCached } }));
-        await sleep(250);
-
-        setStatusMessage('Menganalisis: Fotometrik...');
-        setSecondaryAnalysisState(s => ({ ...s, photometric: { ...s.photometric, loading: true } }));
-        const { data: photoData, isCached: photoCached } = await geminiService.performPhotometricAnalysis(imageForSecondary, primaryData.lighting, analysisModels.photometric);
-        photoRes = photoData;
-        setPhotometricData(photoRes);
-        setSecondaryAnalysisState(s => ({ ...s, photometric: { loading: false, error: null, cached: photoCached } }));
 
         return { vfx: vfxRes, pose: poseRes, shadow: shadowRes, perspective: perspRes, photometric: photoRes };
     }, [sceneSource, sceneImage, referenceImage, subjectImage, analysisModels]);
@@ -263,13 +282,16 @@ const App: React.FC = () => {
             setAppStatus('ANALYZING_PRIMARY');
             setStatusMessage('Menganalisis Subjek & Scene...');
             facialVectorHandlers.handleAnalysisStart();
+            setProxyStatus('PENDING');
 
             const { data: primaryData, isCached } = await geminiService.performComprehensiveAnalysis(
                 subjectImage!, sceneImage, referenceImage, outfitImage, sceneSource, prompt,
                 analysisModels.subject, analysisModels.scene
             );
+            setProxyStatus('SUCCESS');
             console.log('[VHMS LOG] Primary Analysis Complete:', primaryData);
             setAnalysisData(primaryData);
+            setIsPrimaryAnalysisCached(isCached);
             facialVectorHandlers.handleAnalysisSuccess(primaryData, isCached);
 
             let vfxResult: VFXSuggestions | null = null;
@@ -297,15 +319,19 @@ const App: React.FC = () => {
             
             setAppStatus('GENERATING_IMAGE');
             setStatusMessage('Menghasilkan Gambar Komposit...');
+            setProxyStatus('PENDING');
             let generatedImage = await geminiService.generateFinalImage(
                 // Use the state for finalPrompt here to allow for user edits
                 finalPrompt || constructedPrompt, sceneSource, subjectImage!, sceneImage, referenceImage, interactionMask
             );
+            setProxyStatus('SUCCESS');
 
             if (isHarmonizationEnabled) {
                 setAppStatus('HARMONIZING');
                 setStatusMessage('Menjalankan Harmonisasi Akhir...');
+                setProxyStatus('PENDING');
                 generatedImage = await geminiService.performHarmonization(generatedImage, primaryData);
+                setProxyStatus('SUCCESS');
             }
 
             setOutputImage(generatedImage);
@@ -324,6 +350,7 @@ const App: React.FC = () => {
             setHistory(h => [historyItem, ...h]);
 
         } catch (e) {
+            setProxyStatus('ERROR');
             const errorMsg = e instanceof Error ? e.message : String(e);
             setError(errorMsg);
             setAppStatus('ERROR');
@@ -376,16 +403,19 @@ const App: React.FC = () => {
     return (
         <ApiKeyProvider>
             <div className="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
-                <header className="bg-slate-950/70 backdrop-blur-sm p-3 border-b border-slate-700 sticky top-0 z-40">
-                    <h1 className="text-xl font-bold text-center">
+                <header className="bg-slate-950/70 backdrop-blur-sm p-3 border-b border-slate-700 sticky top-0 z-40 flex justify-center items-center">
+                    <h1 className="text-xl font-bold text-center flex-grow">
                         <span className="text-amber-400">VHMS</span> - Visual Harmony & Merge System
                     </h1>
+                    <div className="absolute right-4">
+                        <ProxyStatusIndicator status={proxyStatus} />
+                    </div>
                 </header>
                 
                 <main className="flex-grow p-4 w-full max-w-screen-2xl mx-auto">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-full">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-full">
                         {/* Kolom Kiri untuk Input */}
-                        <div className="flex flex-col space-y-4">
+                        <div className="lg:col-span-6 flex flex-col space-y-4">
                             <InputPanel
                                 subjectImage={subjectImage}
                                 setSubjectImage={setSubjectImage}
@@ -409,7 +439,7 @@ const App: React.FC = () => {
                         </div>
                         
                         {/* Kolom Kanan untuk Output & Prompt Engine */}
-                        <div className="flex flex-col space-y-4">
+                        <div className="lg:col-span-6 flex flex-col space-y-4">
                             <OutputPanel
                                 outputImage={outputImage}
                                 appStatus={appStatus}
@@ -460,6 +490,7 @@ const App: React.FC = () => {
                         }}
                         occlusionSuggestion={analysisData.depthAnalysis.occlusionSuggestion}
                         sceneImage={sceneImageForEditor}
+                        setProxyStatus={setProxyStatus}
                     />
                 )}
                 {isInpaintEditorOpen && outputImage && (
@@ -471,6 +502,7 @@ const App: React.FC = () => {
                             setOutputImage(newImage);
                             setInpaintEditorOpen(false);
                         }}
+                        setProxyStatus={setProxyStatus}
                     />
                 )}
             </div>

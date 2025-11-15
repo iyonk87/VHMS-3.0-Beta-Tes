@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 // FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { BrushIcon, TrashIcon, MagicWandIcon, InfoCircleIcon, EraserIcon } from './icons/Icons';
 import { generateObjectMask } from '../services/geminiService';
-import type { FileWithPreview } from '../types';
+import type { FileWithPreview, ProxyStatus } from '../types';
 import { Tooltip } from './common/Tooltip';
 
 
@@ -21,6 +21,7 @@ interface MaskEditorProps {
   onApply: (maskDataUrl: string) => void;
   occlusionSuggestion: string;
   sceneImage: FileWithPreview;
+  setProxyStatus: (status: ProxyStatus) => void;
 }
 
 const HISTORY_LIMIT = 30;
@@ -33,6 +34,7 @@ export const MaskEditor: React.FC<MaskEditorProps> = ({
   onApply,
   occlusionSuggestion,
   sceneImage,
+  setProxyStatus,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const displayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -195,10 +197,12 @@ export const MaskEditor: React.FC<MaskEditorProps> = ({
     if (!occlusionSuggestion) return;
     
     setIsAutoMasking(true);
+    setProxyStatus('PENDING');
     setAutoMaskMessage({ text: `Meminta AI untuk membuat mask dari deskripsi: "${occlusionSuggestion}"... Ini mungkin butuh beberapa detik.`, type: 'info' });
 
     try {
       const maskDataUrl = await generateObjectMask(sceneImage, occlusionSuggestion);
+      setProxyStatus('SUCCESS');
       
       const maskImage = new Image();
       maskImage.src = maskDataUrl;
@@ -221,13 +225,14 @@ export const MaskEditor: React.FC<MaskEditorProps> = ({
       }
 
     } catch (error) {
+      setProxyStatus('ERROR');
       const errorMessage = error instanceof Error ? error.message : 'Terjadi kesalahan tidak diketahui.';
       console.error("[EDITOR MASK]: Gagal membuat masker otomatis:", error);
       setAutoMaskMessage({ text: `Gagal membuat masker: ${errorMessage}`, type: 'error' });
     } finally {
       setIsAutoMasking(false);
     }
-  }, [sceneImage, occlusionSuggestion, redrawDisplay, pushHistory]);
+  }, [sceneImage, occlusionSuggestion, redrawDisplay, pushHistory, setProxyStatus]);
 
   const getCanvasCoords = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const canvas = displayCanvasRef.current;

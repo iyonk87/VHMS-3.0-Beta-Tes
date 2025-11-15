@@ -175,3 +175,6 @@ export interface VerificationResult {
     overall: { valid: boolean; message: string };
     promptSnippet: string;
 }
+
+// NEW: Defines the real-time status of the backend proxy connection.
+export type ProxyStatus = 'IDLE' | 'PENDING' | 'SUCCESS' | 'ERROR';

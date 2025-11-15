@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 // FIX: Corrected import to point to the new centralized Icons.tsx file.
 import { BrushIcon, TrashIcon, EraserIcon, GenerateIcon } from './icons/Icons';
 import { performInpainting } from '../services/geminiService';
+import type { ProxyStatus } from '../types';
 
 type Tool = 'brush' | 'eraser';
 
@@ -16,6 +17,7 @@ interface InpaintEditorProps {
   onClose: () => void;
   imageSrc: string; // This will be the outputImage
   onApply: (newImageDataUrl: string) => void;
+  setProxyStatus: (status: ProxyStatus) => void;
 }
 
 const HISTORY_LIMIT = 30;
@@ -25,6 +27,7 @@ export const InpaintEditor: React.FC<InpaintEditorProps> = ({
   onClose, 
   imageSrc, 
   onApply,
+  setProxyStatus,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const displayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -300,12 +303,15 @@ export const InpaintEditor: React.FC<InpaintEditorProps> = ({
     }
 
     setIsRegenerating(true);
+    setProxyStatus('PENDING');
     try {
         const maskDataUrl = maskCanvas.toDataURL('image/png');
         console.log("[INPAINT EDITOR]: Mengirim permintaan in-painting...");
         const newImageDataUrl = await performInpainting(imageSrc, maskDataUrl, inpaintPrompt);
+        setProxyStatus('SUCCESS');
         onApply(newImageDataUrl);
     } catch(error) {
+        setProxyStatus('ERROR');
         console.error("[INPAINT EDITOR]: Gagal melakukan in-painting:", error);
         alert(`Gagal melakukan in-painting: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {

@@ -1,4 +1,4 @@
-import { GoogleGenAI, Modality, Part, Type } from "@google/genai";
+import { Modality, Part, Type } from "@google/genai";
 import type {
   ComprehensiveAnalysisData,
   FileWithPreview,
@@ -27,15 +27,38 @@ const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string
   return { inlineData: { data: await base64EncodedDataPromise, mimeType } };
 };
 
-const getGenAI = () => {
-    // START EDIT KRITIS: Hapus semua logika pencarian Kunci API di Frontend.
-    // Frontend tidak lagi membutuhkan Kunci API yang valid karena semua panggilan
-    // sudah diarahkan ke Netlify Proxy di backend.
+const PROXY_URL = '/.netlify/functions/gemini-proxy'; 
+
+async function callProxy(promptBody: any, modelName: string) {
+    const response = await fetch(PROXY_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ promptBody, modelName }), 
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+        let finalErrorMessage = 'Terjadi Kesalahan Proxy: Gagal Menghubungi Server.';
+        if (result) {
+            if (result.error && typeof result.error.message === 'string') {
+                finalErrorMessage = result.error.message;
+            } 
+            else if (typeof result.details === 'string') {
+                finalErrorMessage = result.details;
+            }
+            else if (typeof result.error === 'string') {
+                finalErrorMessage = result.error;
+            }
+        }
+        throw new Error(finalErrorMessage);
+    }
     
-    // Gunakan placeholder yang aman untuk inisialisasi GoogleGenAI.
-    // Ini mencegah error inisialisasi di browser dan menjamin tidak ada kunci lama yang bocor.
-    return new GoogleGenAI({ apiKey: "FRONTEND_PROXY_SAFE_PLACEHOLDER" });
-};
+    return result;
+}
+
 
 // --- Error Interceptor ---
 const handleGeminiError = (error: any): never => {
@@ -43,9 +66,9 @@ const handleGeminiError = (error: any): never => {
 
   const errorMessage = error.message || JSON.stringify(error);
   
-  // EDIT 1: Memperbaiki pesan error agar lebih relevan dengan setup Proxy.
-  if (errorMessage.includes("API key") || errorMessage.includes("FATAL_NO_API_KEY_FOUND") || errorMessage.includes("SAFE_PLACEHOLDER")) {
-       throw new Error("Kunci API tidak ditemukan atau tidak valid. Pastikan Kunci API telah diatur dengan benar di variabel environment Netlify (GEMINI_KEY_POOL).");
+  // 1. Tangani Error Kunci API Hilang/Invalid dengan pesan yang jelas
+  if (errorMessage.includes("API key") || errorMessage.includes("FATAL_NO_API_KEY_FOUND")) {
+       throw new Error("Kunci API tidak ditemukan. Pastikan VITE_GEMINI_API_KEY telah diatur dengan benar di environment variables Anda.");
   }
 
   // 2. Tangani Error 429 (Resource Exhausted / Quota Exceeded)
@@ -56,8 +79,8 @@ const handleGeminiError = (error: any): never => {
     errorMessage.includes("RESOURCE_EXHAUSTED")
   ) {
     throw new Error(
-      "⚠️ Layanan Sedang Sibuk (Batas Kuota Tim Tercapai).\n" +
-      "Rotasi kunci API tim gagal menemukan kunci yang tersedia. Mohon tunggu 30-60 detik dan coba lagi. VHMS Team"
+      "⚠️ Layanan Sedang Sibuk (Batas Kuota Gratis Tercapai).\n" +
+      "Terlalu banyak permintaan dalam waktu singkat. Mohon tunggu sekitar 30-60 detik agar kuota Anda pulih, lalu coba lagi. VHMS Team"
     );
   }
 
@@ -65,7 +88,7 @@ const handleGeminiError = (error: any): never => {
 };
 
 // --- Schemas for Reliable JSON Output ---
-// ... (Bagian Schemas tetap sama) ...
+
 const subjectAnalysisSchema = {
     type: Type.OBJECT,
     properties: {
@@ -183,7 +206,6 @@ const photometricSchema = {
     required: ['keyLight', 'fillLight', 'rimLight', 'ambientBounceLight', 'globalMood'],
 };
 
-
 // --- Generic API Call Helpers ---
 
 const getModelName = (selection: AnalysisModelSelection): string => {
@@ -192,25 +214,23 @@ const getModelName = (selection: AnalysisModelSelection): string => {
 
 async function callGeminiAPI<T>(modelName: string, promptParts: Part[], schema: object): Promise<T> {
   try {
-    const ai = getGenAI();
-    console.log(`[GeminiService] Calling model ${modelName} for JSON output...`);
+    console.log(`[GeminiService] Calling proxy for JSON output using model ${modelName}...`);
   
-    const response = await ai.models.generateContent({
-      model: modelName,
+    const promptBody = {
       contents: { parts: promptParts },
       config: {
         responseMimeType: "application/json",
-        responseSchema: schema as any,
+        responseSchema: schema,
       },
-    });
+    };
 
-    // FIX: Robustly parse the response to avoid `thoughtSignature` warnings.
-    // Instead of using the `.text` shortcut, explicitly find the text part.
-    const textPart = response.candidates?.[0]?.content?.parts?.find(p => 'text' in p);
+    const result = await callProxy(promptBody, modelName);
+
+    const textPart = result.candidates?.[0]?.content?.parts?.find(p => 'text' in p);
 
     if (!textPart || typeof (textPart as any).text !== 'string') {
-      console.error("[GeminiService] No valid JSON text part found in API response.", JSON.stringify(response, null, 2));
-      throw new Error("Respons dari AI tidak mengandung output JSON yang valid.");
+      console.error("[GeminiService] No valid JSON text part found in proxy response.", JSON.stringify(result, null, 2));
+      throw new Error("Respons dari proxy tidak mengandung output JSON yang valid.");
     }
 
     const jsonText = (textPart as any).text.trim();
@@ -223,21 +243,20 @@ async function callGeminiAPI<T>(modelName: string, promptParts: Part[], schema: 
   }
 }
 
-async function callGeminiImageAPI(promptParts: Part[]): Promise<string> {
+async function callGeminiImageAPI(modelName: string, promptParts: Part[]): Promise<string> {
   try {
-    const ai = getGenAI();
-    const model = 'gemini-2.5-flash-image';
-    console.log(`[GeminiService] Calling model ${model} for image output with ${promptParts.length} parts...`);
-
-    const response = await ai.models.generateContent({
-      model,
+    console.log(`[GeminiService] Calling proxy for image output using model ${modelName} with ${promptParts.length} parts...`);
+    
+    const promptBody = {
       contents: { parts: promptParts },
       config: {
         responseModalities: [Modality.IMAGE],
       },
-    });
+    };
 
-    for (const part of response.candidates[0].content.parts) {
+    const result = await callProxy(promptBody, modelName);
+
+    for (const part of result.candidates[0].content.parts) {
       if (part.inlineData) {
         const base64ImageBytes: string = part.inlineData.data;
         return `data:${part.inlineData.mimeType};base64,${base64ImageBytes}`;
@@ -253,7 +272,7 @@ async function callGeminiImageAPI(promptParts: Part[]): Promise<string> {
 }
 
 // --- Primary Analysis Pipeline ---
-// ... (Semua fungsi di bawah ini tetap sama) ...
+
 const analyzeSubject = async (
     subjectImage: FileWithPreview, 
     outfitImage: FileWithPreview | null,
@@ -266,8 +285,7 @@ const analyzeSubject = async (
         prompt += "\nA second image is provided as an outfit reference. Describe this outfit for the subject.";
     }
     parts.unshift({ text: prompt });
-    const modelName = getModelName(modelSelection);
-    return callGeminiAPI<any>(modelName, parts, subjectAnalysisSchema);
+    return callGeminiAPI<any>(getModelName(modelSelection), parts, subjectAnalysisSchema);
 };
 
 const analyzeScene = async (
@@ -277,8 +295,6 @@ const analyzeScene = async (
     prompt: string,
     modelSelection: AnalysisModelSelection
 ) => {
-    // FIX: Added a more robust guard clause to handle the 'generate' case explicitly
-    // and prevent trying to analyze a null image.
     const noImageAvailable = (sceneSource === 'upload' && !sceneImage) || (sceneSource === 'reference' && !referenceImage);
     if (sceneSource === 'generate' || noImageAvailable) {
         return {
@@ -293,17 +309,12 @@ const analyzeScene = async (
     }
 
     const imageToAnalyze = sceneSource === 'upload' ? sceneImage : referenceImage;
-    // This check is now safe because the guard clause above handles the null cases.
     const parts: Part[] = [await fileToGenerativePart(imageToAnalyze!)];
     const analysisPrompt = `Analyze the provided scene image for lighting, composition, color palette, camera details, and depth. The user's goal is: "${prompt}".`;
     parts.unshift({ text: analysisPrompt });
     
-    const modelName = getModelName(modelSelection);
-    return callGeminiAPI<any>(modelName, parts, sceneAnalysisSchema);
+    return callGeminiAPI<any>(getModelName(modelSelection), parts, sceneAnalysisSchema);
 };
-
-// Helper function to add a delay
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const performComprehensiveAnalysis = async (
   subjectImage: FileWithPreview,
@@ -319,15 +330,10 @@ export const performComprehensiveAnalysis = async (
   const cached = cacheService.getComprehensive<ComprehensiveAnalysisData>(cacheKeyFiles);
   if (cached) return { data: cached, isCached: true };
 
-  console.log("[GeminiService] Starting Sequential Micro-Analysis Pipeline with Staggering...");
+  console.log("[GeminiService] Starting Sequential Micro-Analysis Pipeline...");
 
   // Run analyses sequentially to avoid rate limiting on initial burst.
   const subjectData = await analyzeSubject(subjectImage, outfitImage, subjectModel);
-  
-  // PATCH: Add a 1.1-second delay to respect the 60 RPM free tier limit (1 req/sec).
-  console.log("[GeminiService] Staggering API calls... waiting 1100ms.");
-  await sleep(1100);
-  
   const sceneData = await analyzeScene(sceneImage, referenceImage, sceneSource, prompt, sceneModel);
 
   const mergedData: ComprehensiveAnalysisData = {
@@ -358,8 +364,7 @@ export const getVFXSuggestions = async (
     Suggest one 'smart interaction' point for a subject (e.g., "leaning against the railing") and a refined lighting suggestion to enhance realism.`
   };
 
-  const modelName = getModelName(modelSelection);
-  const data = await callGeminiAPI<VFXSuggestions>(modelName, [scenePart, textPart], vfxSchema);
+  const data = await callGeminiAPI<VFXSuggestions>(getModelName(modelSelection), [scenePart, textPart], vfxSchema);
   cacheService.setVFX(sceneImage, data);
   return { data, isCached: false };
 };
@@ -376,8 +381,7 @@ export const adaptPoseForInteraction = async (
     const subjectPart = await fileToGenerativePart(subjectImage);
     const textPart = { text: `The subject's current pose is: "${originalPose}". Adapt this pose to realistically interact with this element: "${interactionDescription}". Describe the new pose and provide a confidence score.` };
 
-    const modelName = getModelName(modelSelection);
-    const data = await callGeminiAPI<PoseAdaptationData>(modelName, [subjectPart, textPart], poseSchema);
+    const data = await callGeminiAPI<PoseAdaptationData>(getModelName(modelSelection), [subjectPart, textPart], poseSchema);
     cacheService.setPoseAdaptation(subjectImage, interactionDescription, data);
     return { data, isCached: false };
 };
@@ -393,8 +397,7 @@ export const generateShadowDescription = async (
 
     const textPart = { text: `A subject is in this pose: "${adaptedPose}", interacting with "${interaction}". The scene lighting is: "${lighting}". Describe the shadow the subject should cast, including its direction and softness (hard, soft, or diffuse).` };
     
-    const modelName = getModelName(modelSelection);
-    const data = await callGeminiAPI<ShadowCastingData>(modelName, [textPart], shadowSchema);
+    const data = await callGeminiAPI<ShadowCastingData>(getModelName(modelSelection), [textPart], shadowSchema);
     cacheService.setShadowData(adaptedPose, interaction, data);
     return { data, isCached: false };
 };
@@ -409,8 +412,7 @@ export const analyzeScenePerspective = async (
     const scenePart = await fileToGenerativePart(sceneImage);
     const textPart = { text: "Analyze the perspective, vanishing point, and relative scale of this scene. Provide a recommended scale factor (as a float, e.g., 0.85) for a human subject to be realistically placed within it. A scale of 1.0 means the subject is at a neutral middle-ground depth." };
 
-    const modelName = getModelName(modelSelection);
-    const data = await callGeminiAPI<PerspectiveAnalysisData>(modelName, [scenePart, textPart], perspectiveSchema);
+    const data = await callGeminiAPI<PerspectiveAnalysisData>(getModelName(modelSelection), [scenePart, textPart], perspectiveSchema);
     cacheService.setPerspective(sceneImage, data);
     return { data, isCached: false };
 };
@@ -433,8 +435,7 @@ export const performPhotometricAnalysis = async (
     Fill the provided JSON schema with precise, actionable details.` 
     };
 
-    const modelName = getModelName(modelSelection);
-    const data = await callGeminiAPI<PhotometricAnalysisData>(modelName, [scenePart, textPart], photometricSchema);
+    const data = await callGeminiAPI<PhotometricAnalysisData>(getModelName(modelSelection), [scenePart, textPart], photometricSchema);
     cacheService.setPhotometricData(sceneImage, data);
     return { data, isCached: false };
 };
@@ -495,7 +496,7 @@ export const generateFinalImage = async (
   // The text prompt should be the first part in the array for many multi-modal models.
   parts.unshift({ text: augmentedPrompt });
 
-  return callGeminiImageAPI(parts);
+  return callGeminiImageAPI('gemini-2.5-flash-image', parts);
 };
 
 export const performHarmonization = async (
@@ -523,7 +524,7 @@ The final output must be only the enhanced, photorealistic image. It should look
   `;
   const textPart = { text: harmonizationPrompt };
 
-  return callGeminiImageAPI([textPart, imagePart]);
+  return callGeminiImageAPI('gemini-2.5-flash-image', [textPart, imagePart]);
 };
 
 export const generateObjectMask = async (
@@ -533,7 +534,7 @@ export const generateObjectMask = async (
   const scenePart = await fileToGenerativePart(sceneImage);
   const textPart = { text: `Generate a black and white segmentation mask for the following object in the image: "${occlusionSuggestion}". The object(s) of interest MUST be solid white (#FFFFFF) and the entire background MUST be solid black (#000000). Do not include any shades of gray, text, or other elements. The output must be only the binary mask.` };
   
-  return callGeminiImageAPI([scenePart, textPart]);
+  return callGeminiImageAPI('gemini-2.5-flash-image', [scenePart, textPart]);
 };
 
 export const performInpainting = async (
@@ -548,5 +549,5 @@ export const performInpainting = async (
   const maskPart = await fileToGenerativePart(maskBlob, 'image/png'); 
   const textPart = { text: `You are an expert inpainting model. Use the second image as a mask. The white areas of the mask indicate the region to modify in the first image. Fill the masked region according to this instruction: "${inpaintPrompt}". The result should be seamless and photorealistic.` };
 
-  return callGeminiImageAPI([imagePart, maskPart, textPart]);
+  return callGeminiImageAPI('gemini-2.5-flash-image', [imagePart, maskPart, textPart]);
 };
