@@ -2,10 +2,8 @@
 
 // [ENHANCEMENT] Import crypto for unique request IDs
 import { randomUUID } from 'crypto';
-
-// IMPORTANT: This proxy requires the 'node-fetch' package to be installed for Netlify functions.
-// Run: npm install node-fetch
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+// [REFACTOR] Import the official Google GenAI SDK
+import { GoogleGenAI } from '@google/genai';
 
 
 export const handler = async (event) => {
@@ -62,20 +60,15 @@ export const handler = async (event) => {
         console.log(`[Proxy ATTEMPT: ${requestId}] Trying Key: ${shortKey} for model ${modelName}`);
         
         try {
-            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-            
-            const fetchResponse = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-            
-            const responseText = await fetchResponse.text();
+            // [REFACTOR] Instantiate the SDK client with the current key from the pool.
+            const ai = new GoogleGenAI({ apiKey });
 
-            if (!fetchResponse.ok) {
-                // Throw an error to be caught by the catch block, triggering a retry with the next key.
-                throw new Error(`Google API Error (Status: ${fetchResponse.status}): ${responseText}`);
-            }
+            // [REFACTOR] Make the API call using the robust SDK method.
+            // The payload from the client already contains `contents` and `config`.
+            const response = await ai.models.generateContent({
+                model: modelName,
+                ...payload,
+            });
             
             // Berhasil!
             // [LOGGING] Log the successful key.
@@ -83,15 +76,14 @@ export const handler = async (event) => {
             return {
                 statusCode: 200,
                 headers: { 'Content-Type': 'application/json' },
-                body: responseText,
+                // The SDK response object can be directly stringified.
+                body: JSON.stringify(response),
             };
             
         } catch (error) {
-            // Gagal. Simpan error dan biarkan loop berlanjut untuk mencoba kunci berikutnya.
-            const errorMessage = error.message || JSON.stringify(error);
+            // The SDK throws helpful errors. We'll capture the message.
+            const errorMessage = error.message || 'An unknown error occurred with the SDK.';
             lastError = errorMessage;
-            
-            // [LOGGING] Log the specific failure for this key.
             console.warn(`[Proxy FAILED_ATTEMPT: ${requestId}] Key ${shortKey} failed: ${errorMessage}`);
         }
     }

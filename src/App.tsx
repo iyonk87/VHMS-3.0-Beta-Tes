@@ -182,7 +182,6 @@ const App: React.FC = () => {
     
     const runAllSecondaryAnalysesAndGetData = useCallback(async (primaryData: ComprehensiveAnalysisData) => {
         setAppStatus('ANALYZING_SECONDARY');
-
         const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
         
         const imageForSecondary = sceneSource === 'upload' ? sceneImage : referenceImage;
@@ -197,74 +196,102 @@ const App: React.FC = () => {
         let shadowRes: ShadowCastingData | null = null;
         let perspRes: PerspectiveAnalysisData | null = null;
         let photoRes: PhotometricAnalysisData | null = null;
-        
+
+        // --- VFX Analysis ---
         try {
             setStatusMessage('Menganalisis: VFX & Interaksi...');
-            setSecondaryAnalysisState(s => ({ ...s, vfx: { ...s.vfx, loading: true } }));
+            setSecondaryAnalysisState(s => ({ ...s, vfx: { ...s.vfx, loading: true, error: null } }));
             setProxyStatus('PENDING');
-            const { data: vfxData, isCached: vfxCached } = await geminiService.getVFXSuggestions(imageForSecondary, primaryData, analysisModels.vfx);
-            vfxRes = vfxData;
+            const { data, isCached } = await geminiService.getVFXSuggestions(imageForSecondary, primaryData, analysisModels.vfx);
+            vfxRes = data;
             setVfxData(vfxRes);
-            setSecondaryAnalysisState(s => ({ ...s, vfx: { loading: false, error: null, cached: vfxCached } }));
+            setSecondaryAnalysisState(s => ({ ...s, vfx: { loading: false, error: null, cached: isCached } }));
             setProxyStatus('SUCCESS');
-            await sleep(250);
-
-            if (vfxRes.smartInteraction) {
-                setStatusMessage('Menganalisis: Adaptasi Pose...');
-                setSecondaryAnalysisState(s => ({ ...s, pose: { ...s.pose, loading: true } }));
-                setProxyStatus('PENDING');
-                const { data: poseData, isCached: poseCached } = await geminiService.adaptPoseForInteraction(subjectImage!, primaryData.subjectPose, vfxRes.smartInteraction.placementSuggestion, analysisModels.pose);
-                poseRes = poseData;
-                setPoseData(poseRes);
-                setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: poseCached } }));
-                setProxyStatus('SUCCESS');
-                await sleep(250);
-
-                setStatusMessage('Menganalisis: Bayangan...');
-                setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true } }));
-                setProxyStatus('PENDING');
-                const { data: shadowData, isCached: shadowCached } = await geminiService.generateShadowDescription(poseRes.adaptedPoseDescription, vfxRes.smartInteraction.placementSuggestion, primaryData.lighting, analysisModels.shadow);
-                shadowRes = shadowData;
-                setShadowData(shadowRes);
-                setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: shadowCached } }));
-                setProxyStatus('SUCCESS');
-            } else {
-                setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: false } }));
-                setStatusMessage('Menganalisis: Bayangan...');
-                setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true } }));
-                setProxyStatus('PENDING');
-                const { data: shadowData, isCached: shadowCached } = await geminiService.generateShadowDescription(primaryData.subjectPose, "No specific interaction", primaryData.lighting, analysisModels.shadow);
-                shadowRes = shadowData;
-                setShadowData(shadowRes);
-                setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: shadowCached } }));
-                setProxyStatus('SUCCESS');
-            }
-            await sleep(250);
-
-            setStatusMessage('Menganalisis: Perspektif...');
-            setSecondaryAnalysisState(s => ({ ...s, perspective: { ...s.perspective, loading: true } }));
-            setProxyStatus('PENDING');
-            const { data: perspData, isCached: perspCached } = await geminiService.analyzeScenePerspective(imageForSecondary, analysisModels.perspective);
-            perspRes = perspData;
-            setPerspectiveData(perspRes);
-            setSecondaryAnalysisState(s => ({ ...s, perspective: { loading: false, error: null, cached: perspCached } }));
-            setProxyStatus('SUCCESS');
-            await sleep(250);
-
-            setStatusMessage('Menganalisis: Fotometrik...');
-            setSecondaryAnalysisState(s => ({ ...s, photometric: { ...s.photometric, loading: true } }));
-            setProxyStatus('PENDING');
-            const { data: photoData, isCached: photoCached } = await geminiService.performPhotometricAnalysis(imageForSecondary, primaryData.lighting, analysisModels.photometric);
-            photoRes = photoData;
-            setPhotometricData(photoRes);
-            setSecondaryAnalysisState(s => ({ ...s, photometric: { loading: false, error: null, cached: photoCached } }));
-            setProxyStatus('SUCCESS');
-
-        } catch(e) {
+        } catch (e) {
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            console.error('[VHMS ERROR] VFX Analysis failed:', errorMsg);
+            setSecondaryAnalysisState(s => ({ ...s, vfx: { loading: false, error: errorMsg, cached: false } }));
             setProxyStatus('ERROR');
-            throw e; // Re-throw to be caught by the main handler
         }
+        await sleep(250);
 
+        // --- Pose Adaptation ---
+        if (vfxRes?.smartInteraction) {
+            try {
+                setStatusMessage('Menganalisis: Adaptasi Pose...');
+                setSecondaryAnalysisState(s => ({ ...s, pose: { ...s.pose, loading: true, error: null } }));
+                setProxyStatus('PENDING');
+                const { data, isCached } = await geminiService.adaptPoseForInteraction(subjectImage!, primaryData.subjectPose, vfxRes.smartInteraction.placementSuggestion, analysisModels.pose);
+                poseRes = data;
+                setPoseData(poseRes);
+                setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: null, cached: isCached } }));
+                setProxyStatus('SUCCESS');
+            } catch (e) {
+                const errorMsg = e instanceof Error ? e.message : String(e);
+                console.error('[VHMS ERROR] Pose Adaptation failed:', errorMsg);
+                setSecondaryAnalysisState(s => ({ ...s, pose: { loading: false, error: errorMsg, cached: false } }));
+                setProxyStatus('ERROR');
+            }
+        } else {
+            setSecondaryAnalysisState(s => ({ ...s, pose: { ...s.pose, loading: false, error: null, cached: false } }));
+        }
+        await sleep(250);
+
+        // --- Shadow Analysis ---
+        try {
+            setStatusMessage('Menganalisis: Bayangan...');
+            setSecondaryAnalysisState(s => ({ ...s, shadow: { ...s.shadow, loading: true, error: null } }));
+            setProxyStatus('PENDING');
+            const poseForShadow = poseRes?.adaptedPoseDescription || primaryData.subjectPose;
+            const interactionForShadow = vfxRes?.smartInteraction?.placementSuggestion || "No specific interaction";
+            const { data, isCached } = await geminiService.generateShadowDescription(poseForShadow, interactionForShadow, primaryData.lighting, analysisModels.shadow);
+            shadowRes = data;
+            setShadowData(shadowRes);
+            setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: null, cached: isCached } }));
+            setProxyStatus('SUCCESS');
+        } catch (e) {
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            console.error('[VHMS ERROR] Shadow Analysis failed:', errorMsg);
+            setSecondaryAnalysisState(s => ({ ...s, shadow: { loading: false, error: errorMsg, cached: false } }));
+            setProxyStatus('ERROR');
+        }
+        await sleep(250);
+
+        // --- Perspective Analysis ---
+        try {
+            setStatusMessage('Menganalisis: Perspektif...');
+            setSecondaryAnalysisState(s => ({ ...s, perspective: { ...s.perspective, loading: true, error: null } }));
+            setProxyStatus('PENDING');
+            const { data, isCached } = await geminiService.analyzeScenePerspective(imageForSecondary, analysisModels.perspective);
+            perspRes = data;
+            setPerspectiveData(perspRes);
+            setSecondaryAnalysisState(s => ({ ...s, perspective: { loading: false, error: null, cached: isCached } }));
+            setProxyStatus('SUCCESS');
+        } catch (e) {
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            console.error('[VHMS ERROR] Perspective Analysis failed:', errorMsg);
+            setSecondaryAnalysisState(s => ({ ...s, perspective: { loading: false, error: errorMsg, cached: false } }));
+            setProxyStatus('ERROR');
+        }
+        await sleep(250);
+
+        // --- Photometric Analysis ---
+        try {
+            setStatusMessage('Menganalisis: Fotometrik...');
+            setSecondaryAnalysisState(s => ({ ...s, photometric: { ...s.photometric, loading: true, error: null } }));
+            setProxyStatus('PENDING');
+            const { data, isCached } = await geminiService.performPhotometricAnalysis(imageForSecondary, primaryData.lighting, analysisModels.photometric);
+            photoRes = data;
+            setPhotometricData(photoRes);
+            setSecondaryAnalysisState(s => ({ ...s, photometric: { loading: false, error: null, cached: isCached } }));
+            setProxyStatus('SUCCESS');
+        } catch (e) {
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            console.error('[VHMS ERROR] Photometric Analysis failed:', errorMsg);
+            setSecondaryAnalysisState(s => ({ ...s, photometric: { loading: false, error: errorMsg, cached: false } }));
+            setProxyStatus('ERROR');
+        }
+        
         return { vfx: vfxRes, pose: poseRes, shadow: shadowRes, perspective: perspRes, photometric: photoRes };
     }, [sceneSource, sceneImage, referenceImage, subjectImage, analysisModels]);
 
