@@ -15,11 +15,99 @@ import { ApiKeyProvider } from './ApiKeyContext';
 import { OutputPanel } from '../components/OutputPanel';
 import { PromptEnginePanel } from '../components/PromptEnginePanel';
 import { ProxyStatusIndicator } from '../components/common/ProxyStatusIndicator';
+import { UploadIcon } from '../components/icons/Icons'; 
 
 
 import * as geminiService from '../services/geminiService';
 import { constructFinalPrompt } from './utils/promptUtils';
 import { useFacialVectorAnalysis } from '../hooks/useFacialVectorAnalysis';
+
+const IdentityLockModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onGenerate: (files: FileWithPreview[]) => Promise<void>;
+    isGeneratingLock: boolean;
+}> = ({ isOpen, onClose, onGenerate, isGeneratingLock }) => {
+    const [files, setFiles] = useState<FileWithPreview[]>([]);
+    const [dragActive, setDragActive] = useState(false);
+
+    const handleFileChange = (selectedFiles: FileList | null) => {
+        if (selectedFiles) {
+            const newFiles = Array.from(selectedFiles)
+                .filter(file => file.type.startsWith('image/'))
+                .map(file => Object.assign(file, { preview: URL.createObjectURL(file) }));
+            setFiles(prev => [...prev, ...newFiles].slice(0, 5)); // Limit to 5 files
+        }
+    };
+    
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragActive(false);
+        if (e.dataTransfer.files) {
+            handleFileChange(e.dataTransfer.files);
+        }
+    };
+    
+    const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === "dragenter" || e.type === "dragover") setDragActive(true);
+        else if (e.type === "dragleave") setDragActive(false);
+    };
+    
+    const removeFile = (index: number) => {
+        setFiles(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const handleGenerateClick = () => {
+        if (files.length > 0 && !isGeneratingLock) {
+            onGenerate(files);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={onClose}>
+            <div className="bg-slate-800 border border-slate-700 p-4 rounded-lg shadow-xl w-full max-w-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-semibold text-amber-400">Buat Identity Lock+ (SSEL-Lite)</h3>
+                <p className="text-sm text-slate-400 mt-1 mb-4">Unggah 1-5 foto wajah subjek untuk membuat kunci identitas yang sangat akurat. Hasil terbaik didapat dari berbagai sudut dan pencahayaan.</p>
+
+                <div 
+                    onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
+                    className={`p-4 border-2 border-dashed rounded-md transition-colors h-48 flex flex-col items-center justify-center ${dragActive ? 'border-amber-500 bg-amber-900/20' : 'border-slate-600'}`}
+                >
+                    <UploadIcon className="w-8 h-8 text-slate-500 mb-2"/>
+                    <p className="text-slate-400">Seret & lepas gambar, atau <label htmlFor="identity-upload" className="font-semibold text-amber-400 cursor-pointer hover:underline">klik untuk memilih</label>.</p>
+                    <p className="text-xs text-slate-500 mt-1">Maksimal 5 gambar.</p>
+                    <input type="file" id="identity-upload" multiple accept="image/*" className="hidden" onChange={e => handleFileChange(e.target.files)} />
+                </div>
+
+                <div className="grid grid-cols-5 gap-2 mt-4 min-h-[60px]">
+                    {files.map((file, i) => (
+                        <div key={i} className="relative aspect-square">
+                            <img src={file.preview} alt={`preview ${i}`} className="w-full h-full object-cover rounded"/>
+                            <button onClick={() => removeFile(i)} className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full w-5 h-5 text-xs font-bold">X</button>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-slate-700 flex justify-end gap-2">
+                    <button onClick={onClose} className="text-slate-300 px-4 py-2 rounded-md hover:bg-slate-700 font-semibold">Batal</button>
+                    <button 
+                        onClick={handleGenerateClick} 
+                        disabled={files.length === 0 || isGeneratingLock}
+                        className="bg-amber-500 text-slate-900 px-6 py-2 rounded-md hover:bg-amber-600 font-semibold disabled:bg-slate-600 disabled:cursor-not-allowed"
+                    >
+                        {isGeneratingLock ? 'Memproses...' : `Buat Lock (${files.length} gambar)`}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 const initialSecondaryAnalysisState: Record<RegeneratableModule, SecondaryAnalysisModuleState> = {
     vfx: { loading: false, error: null, cached: false },
@@ -76,6 +164,12 @@ const App: React.FC = () => {
     const [isMaskEditorOpen, setMaskEditorOpen] = useState<boolean>(false);
     const [interactionMask, setInteractionMask] = useState<string | null>(null);
     const [isInpaintEditorOpen, setInpaintEditorOpen] = useState<boolean>(false);
+    // SSEL & 'Dari Prompt' State
+    const [isIdentityModalOpen, setIdentityModalOpen] = useState(false);
+    const [customIdentityLock, setCustomIdentityLock] = useState<string | null>(null);
+    const [isGeneratingLock, setIsGeneratingLock] = useState(false);
+    const [isDescribingSubject, setIsDescribingSubject] = useState(false); // NEW
+
 
     // 6. History
     const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -89,7 +183,12 @@ const App: React.FC = () => {
 
     // --- Core Application Logic ---
 
-    // NEW: Smart clear logic for switching modes
+    const handleSetSubjectImage = useCallback((file: FileWithPreview) => {
+        setSubjectImage(file);
+        setCustomIdentityLock(null);
+        console.log("[VHMS LOG] Subject image changed, Custom Identity Lock has been cleared.");
+    }, []);
+
     useEffect(() => {
         setPrompt('');
         setSceneImage(null);
@@ -118,6 +217,7 @@ const App: React.FC = () => {
             setReferenceImage(null);
             setOutfitImage(null);
             setPrompt('');
+            setCustomIdentityLock(null); 
         }
     }, [facialVectorHandlers]);
     
@@ -133,7 +233,8 @@ const App: React.FC = () => {
         setInteractionMask(null);
         setSecondaryAnalysisState(initialSecondaryAnalysisState);
         facialVectorHandlers.reset();
-    }, [subjectImage, sceneImage, referenceImage, outfitImage, sceneSource, prompt, facialVectorHandlers]);
+    }, [sceneImage, referenceImage, outfitImage, sceneSource, prompt, facialVectorHandlers]);
+
 
     const performValidation = useCallback((): VerificationResult => {
         const subject = { valid: !!subjectImage, message: subjectImage ? "Gambar subjek ditemukan." : "Kesalahan: Gambar subjek diperlukan." };
@@ -306,69 +407,86 @@ const App: React.FC = () => {
         resetState();
         
         try {
-            setAppStatus('ANALYZING_PRIMARY');
-            setStatusMessage('Menganalisis Subjek & Scene...');
-            facialVectorHandlers.handleAnalysisStart();
-            setProxyStatus('PENDING');
+            let finalImageResult: string;
+            let finalConstructedPrompt: string;
+            
+            if (sceneSource === 'generate') {
+                setAppStatus('ANALYZING_PRIMARY');
+                setStatusMessage('Mempersiapkan Aset Identitas...');
+                setProxyStatus('PENDING');
 
-            const { data: primaryData, isCached } = await geminiService.performComprehensiveAnalysis(
-                subjectImage!, sceneImage, referenceImage, outfitImage, sceneSource, prompt,
-                analysisModels.subject, analysisModels.scene
-            );
-            setProxyStatus('SUCCESS');
-            console.log('[VHMS LOG] Primary Analysis Complete:', primaryData);
-            setAnalysisData(primaryData);
-            setIsPrimaryAnalysisCached(isCached);
-            facialVectorHandlers.handleAnalysisSuccess(primaryData, isCached);
+                let finalIdentityLock: string;
+                if (customIdentityLock) {
+                    finalIdentityLock = customIdentityLock;
+                    console.log("[VHMS LOG] Using pre-generated Custom Identity Lock.");
+                } else {
+                    console.log("[VHMS LOG] No Custom Lock. Generating single-image lock as fallback.");
+                    finalIdentityLock = await geminiService.generateSingleImageIdentityLock(subjectImage!, analysisModels.subject);
+                }
+                
+                const minimalAnalysisData = { identityLock: finalIdentityLock } as ComprehensiveAnalysisData;
+                setAnalysisData(minimalAnalysisData);
+                setProxyStatus('SUCCESS');
+                
+                setStatusMessage('Membangun Prompt Final...');
+                finalConstructedPrompt = constructFinalPrompt(prompt, sceneSource, minimalAnalysisData, null, null, null, null, null, stylePreset, resolution);
+                setFinalPrompt(finalConstructedPrompt);
+                
+                setAppStatus('GENERATING_IMAGE');
+                setStatusMessage('Menghasilkan Gambar Komposit...');
+                setProxyStatus('PENDING');
+                finalImageResult = await geminiService.generateFinalImage(finalConstructedPrompt, sceneSource, subjectImage!, null, null, null);
+                setProxyStatus('SUCCESS');
 
-            let vfxResult: VFXSuggestions | null = null;
-            let poseResult: PoseAdaptationData | null = null;
-            let shadowResult: ShadowCastingData | null = null;
-            let perspectiveResult: PerspectiveAnalysisData | null = null;
-            let photometricResult: PhotometricAnalysisData | null = null;
+            } else {
+                setAppStatus('ANALYZING_PRIMARY');
+                setStatusMessage('Menganalisis Subjek & Scene...');
+                facialVectorHandlers.handleAnalysisStart();
+                setProxyStatus('PENDING');
 
-            if (sceneSource === 'upload' || sceneSource === 'reference') {
+                const { data: primaryData, isCached } = await geminiService.performComprehensiveAnalysis(
+                    subjectImage!, sceneImage, referenceImage, outfitImage, sceneSource, prompt,
+                    analysisModels.subject, analysisModels.scene
+                );
+                setProxyStatus('SUCCESS');
+                console.log('[VHMS LOG] Primary Analysis Complete:', primaryData);
+                setAnalysisData(primaryData);
+                setIsPrimaryAnalysisCached(isCached);
+                facialVectorHandlers.handleAnalysisSuccess(primaryData, isCached);
+
                 const secondaryData = await runAllSecondaryAnalysesAndGetData(primaryData);
                 console.log('[VHMS LOG] Secondary Analysis Complete:', secondaryData);
-                vfxResult = secondaryData.vfx;
-                poseResult = secondaryData.pose;
-                shadowResult = secondaryData.shadow;
-                perspectiveResult = secondaryData.perspective;
-                photometricResult = secondaryData.photometric;
-            }
+                const {vfx: vfxResult, pose: poseResult, shadow: shadowResult, perspective: perspectiveResult, photometric: photometricResult} = secondaryData;
 
-            setStatusMessage('Membangun Prompt Final...');
-            const constructedPrompt = constructFinalPrompt(
-                prompt, sceneSource, primaryData, vfxResult, poseResult, shadowResult, perspectiveResult, photometricResult, stylePreset, resolution
-            );
-            console.log('[VHMS LOG] Final Prompt Constructed:', constructedPrompt);
-            setFinalPrompt(constructedPrompt);
-            
-            setAppStatus('GENERATING_IMAGE');
-            setStatusMessage('Menghasilkan Gambar Komposit...');
-            setProxyStatus('PENDING');
-            let generatedImage = await geminiService.generateFinalImage(
-                // Use the state for finalPrompt here to allow for user edits
-                finalPrompt || constructedPrompt, sceneSource, subjectImage!, sceneImage, referenceImage, interactionMask
-            );
-            setProxyStatus('SUCCESS');
-
-            if (isHarmonizationEnabled) {
-                setAppStatus('HARMONIZING');
-                setStatusMessage('Menjalankan Harmonisasi Akhir...');
+                setStatusMessage('Membangun Prompt Final...');
+                finalConstructedPrompt = constructFinalPrompt(prompt, sceneSource, primaryData, vfxResult, poseResult, shadowResult, perspectiveResult, photometricResult, stylePreset, resolution);
+                console.log('[VHMS LOG] Final Prompt Constructed:', finalConstructedPrompt);
+                setFinalPrompt(finalConstructedPrompt);
+                
+                setAppStatus('GENERATING_IMAGE');
+                setStatusMessage('Menghasilkan Gambar Komposit...');
                 setProxyStatus('PENDING');
-                generatedImage = await geminiService.performHarmonization(generatedImage, primaryData);
+                let tempGeneratedImage = await geminiService.generateFinalImage(finalConstructedPrompt, sceneSource, subjectImage!, sceneImage, referenceImage, interactionMask);
                 setProxyStatus('SUCCESS');
-            }
 
-            setOutputImage(generatedImage);
+                if (isHarmonizationEnabled) {
+                    setAppStatus('HARMONIZING');
+                    setStatusMessage('Menjalankan Harmonisasi Akhir...');
+                    setProxyStatus('PENDING');
+                    tempGeneratedImage = await geminiService.performHarmonization(tempGeneratedImage, primaryData);
+                    setProxyStatus('SUCCESS');
+                }
+                finalImageResult = tempGeneratedImage;
+            }
+            
+            setOutputImage(finalImageResult);
             setAppStatus('DONE');
             setStatusMessage('');
-
+            
             const historyItem: HistoryItem = {
                 id: `hist-${Date.now()}`,
                 timestamp: Date.now(),
-                outputImage: generatedImage,
+                outputImage: finalImageResult,
                 inputs: {
                     subjectImage: subjectImage!, sceneImage, referenceImage, outfitImage, prompt,
                     sceneSource, stylePreset, resolution
@@ -385,10 +503,49 @@ const App: React.FC = () => {
         }
     }, [
         performValidation, resetState, facialVectorHandlers, subjectImage, sceneImage, 
-        referenceImage, outfitImage, sceneSource, prompt, analysisModels, 
+        referenceImage, outfitImage, sceneSource, prompt, analysisModels, customIdentityLock,
         runAllSecondaryAnalysesAndGetData, stylePreset, resolution, interactionMask, 
-        isHarmonizationEnabled, finalPrompt // Add finalPrompt as dependency
+        isHarmonizationEnabled
     ]);
+    
+    const handleGenerateCustomLock = useCallback(async (images: FileWithPreview[]) => {
+        if (images.length === 0) return;
+        setIsGeneratingLock(true);
+        setProxyStatus('PENDING');
+        try {
+            const lock = await geminiService.generateIdentityLockFromImages(images, analysisModels.subject);
+            setCustomIdentityLock(lock);
+            setProxyStatus('SUCCESS');
+            setIdentityModalOpen(false);
+            console.log("[VHMS LOG] Custom Identity Lock+ successfully generated and applied.");
+        } catch (e) {
+            setProxyStatus('ERROR');
+            const errorMsg = e instanceof Error ? e.message : "Gagal membuat Identity Lock.";
+            alert(errorMsg); // Simple feedback for now
+        } finally {
+            setIsGeneratingLock(false);
+        }
+    }, [analysisModels.subject]);
+    
+    // NEW: Handler for the "AI Assist" button
+    const handleDescribeSubject = useCallback(async () => {
+        if (!subjectImage) return;
+        setIsDescribingSubject(true);
+        setProxyStatus('PENDING');
+        try {
+            const description = await geminiService.describeSubjectImage(subjectImage, analysisModels.subject);
+            const formattedDescription = `[DESKRIPSI SUBJEK: ${description}], `;
+            setPrompt(prev => formattedDescription + prev);
+            setProxyStatus('SUCCESS');
+        } catch (e) {
+            setProxyStatus('ERROR');
+            const errorMsg = e instanceof Error ? e.message : "Gagal mendeskripsikan subjek.";
+            setError(errorMsg);
+        } finally {
+            setIsDescribingSubject(false);
+        }
+    }, [subjectImage, analysisModels.subject]);
+
 
     const handleRegeneratePrompt = useCallback(() => {
         if (!analysisData) {
@@ -445,7 +602,7 @@ const App: React.FC = () => {
                         <div className="lg:col-span-6 flex flex-col space-y-4">
                             <InputPanel
                                 subjectImage={subjectImage}
-                                setSubjectImage={setSubjectImage}
+                                setSubjectImage={handleSetSubjectImage}
                                 sceneImage={sceneImage}
                                 setSceneImage={setSceneImage}
                                 referenceImage={referenceImage}
@@ -462,6 +619,10 @@ const App: React.FC = () => {
                                 setResolution={setResolution}
                                 isHarmonizationEnabled={isHarmonizationEnabled}
                                 setIsHarmonizationEnabled={setIsHarmonizationEnabled}
+                                onOpenIdentityModal={() => setIdentityModalOpen(true)}
+                                customIdentityLock={customIdentityLock}
+                                onDescribeSubject={handleDescribeSubject}
+                                isDescribingSubject={isDescribingSubject}
                             />
                         </div>
                         
@@ -532,6 +693,12 @@ const App: React.FC = () => {
                         setProxyStatus={setProxyStatus}
                     />
                 )}
+                <IdentityLockModal
+                    isOpen={isIdentityModalOpen}
+                    onClose={() => setIdentityModalOpen(false)}
+                    onGenerate={handleGenerateCustomLock}
+                    isGeneratingLock={isGeneratingLock}
+                />
             </div>
         </ApiKeyProvider>
     );

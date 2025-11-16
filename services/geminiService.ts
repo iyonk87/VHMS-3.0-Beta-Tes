@@ -206,6 +206,18 @@ const photometricSchema = {
     required: ['keyLight', 'fillLight', 'rimLight', 'ambientBounceLight', 'globalMood'],
 };
 
+const identityLockSchema = {
+    type: Type.OBJECT,
+    properties: {
+        identityLock: { 
+            type: Type.STRING, 
+            description: "Create a single, highly detailed, unique vector-like description of the subject's consistent facial features synthesized from all provided images. Be extremely specific to ensure identity consistency." 
+        },
+    },
+    required: ['identityLock'],
+};
+
+
 // --- Generic API Call Helpers ---
 
 const getModelName = (selection: AnalysisModelSelection): string => {
@@ -242,6 +254,33 @@ async function callGeminiAPI<T>(modelName: string, promptParts: Part[], schema: 
     throw e; 
   }
 }
+
+// NEW: Generic function for simple text-based responses (no JSON schema)
+async function callGeminiTextAPI(modelName: string, promptParts: Part[]): Promise<string> {
+  try {
+    console.log(`[GeminiService] Calling proxy for text output using model ${modelName}...`);
+
+    const promptBody = {
+      contents: { parts: promptParts },
+    };
+
+    const result = await callProxy(promptBody, modelName);
+
+    const textPart = result.candidates?.[0]?.content?.parts?.find(p => 'text' in p);
+
+    if (!textPart || typeof (textPart as any).text !== 'string') {
+      console.error("[GeminiService] No valid text part found in proxy response.", JSON.stringify(result, null, 2));
+      throw new Error("Respons dari proxy tidak mengandung output teks yang valid.");
+    }
+
+    return (textPart as any).text.trim();
+
+  } catch (e) {
+    handleGeminiError(e);
+    throw e;
+  }
+}
+
 
 async function callGeminiImageAPI(modelName: string, promptParts: Part[]): Promise<string> {
   try {
@@ -345,6 +384,65 @@ export const performComprehensiveAnalysis = async (
   cacheService.setComprehensive(cacheKeyFiles, mergedData);
   return { data: mergedData, isCached: false };
 };
+
+// --- 'Dari Prompt' Mode Specific Functions ---
+
+export const generateIdentityLockFromImages = async (
+    images: FileWithPreview[],
+    modelSelection: AnalysisModelSelection
+): Promise<string> => {
+    const cached = cacheService.getIdentityLock(images);
+    if (cached) return cached;
+    
+    const parts: Part[] = [];
+    for (const image of images) {
+        parts.push(await fileToGenerativePart(image));
+    }
+    const prompt = `Analyze these ${images.length} images of the same person. Synthesize and return a single, unified 'identityLock' string that captures their core facial features consistently across all photos. The lock should be extremely detailed to ensure high-fidelity identity preservation in subsequent image generations.`;
+    parts.unshift({ text: prompt });
+
+    const result = await callGeminiAPI<{ identityLock: string }>(getModelName(modelSelection), parts, identityLockSchema);
+    
+    cacheService.setIdentityLock(images, result.identityLock);
+    return result.identityLock;
+};
+
+// NEW: Generates a basic identity lock from a single image. A necessary fallback.
+export const generateSingleImageIdentityLock = async (
+    image: FileWithPreview,
+    modelSelection: AnalysisModelSelection
+): Promise<string> => {
+    const cached = cacheService.getIdentityLock([image]);
+    if (cached) return cached;
+
+    const parts: Part[] = [await fileToGenerativePart(image)];
+    const prompt = `Analyze this image of a person. Create and return a single, unified 'identityLock' string that captures their core facial features. The lock should be extremely detailed to ensure high-fidelity identity preservation.`;
+    parts.unshift({ text: prompt });
+
+    const result = await callGeminiAPI<{ identityLock: string }>(getModelName(modelSelection), parts, identityLockSchema);
+
+    cacheService.setIdentityLock([image], result.identityLock);
+    return result.identityLock;
+};
+
+// NEW: Function for the "AI Assist" button. Generates a simple text description.
+export const describeSubjectImage = async (
+    subjectImage: FileWithPreview,
+    modelSelection: AnalysisModelSelection
+): Promise<string> => {
+    const cached = cacheService.getSubjectDescription(subjectImage);
+    if (cached) return cached;
+
+    const parts: Part[] = [await fileToGenerativePart(subjectImage)];
+    const prompt = `Analyze the person in this image. Describe their pose and outfit in a single, concise sentence. This description will be used in an image generation prompt. Example: "A woman wearing a red leather jacket, standing and looking at the camera."`;
+    parts.unshift({ text: prompt });
+    
+    const description = await callGeminiTextAPI(getModelName(modelSelection), parts);
+
+    cacheService.setSubjectDescription(subjectImage, description);
+    return description;
+};
+
 
 // --- Secondary Analysis Functions ---
 

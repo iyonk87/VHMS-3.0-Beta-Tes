@@ -3,8 +3,7 @@ import type { FileWithPreview, SceneSource, StylePreset, Resolution } from '../t
 import { Card } from './common/Card';
 import { DropZone } from './common/DropZone';
 import { Tooltip } from './common/Tooltip';
-// FIX: Corrected import to point to the new centralized Icons.tsx file.
-import { InputIcon } from './icons/Icons';
+import { InputIcon, SparklesIcon } from './icons/Icons';
 
 interface InputPanelProps {
   subjectImage: FileWithPreview | null;
@@ -25,6 +24,11 @@ interface InputPanelProps {
   setResolution: (resolution: Resolution) => void;
   isHarmonizationEnabled: boolean;
   setIsHarmonizationEnabled: (enabled: boolean) => void;
+  onOpenIdentityModal: () => void;
+  customIdentityLock: string | null;
+  // NEW PROPS for AI Assist Feature
+  onDescribeSubject: () => void;
+  isDescribingSubject: boolean;
 }
 
 const sceneOptions: { id: SceneSource; label: string }[] = [
@@ -54,7 +58,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   referenceImage,
   setReferenceImage,
   outfitImage,
-  onOpenCropModal, // CHANGED
+  onOpenCropModal,
   prompt,
   setPrompt,
   sceneSource,
@@ -65,6 +69,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   setResolution,
   isHarmonizationEnabled,
   setIsHarmonizationEnabled,
+  onOpenIdentityModal,
+  customIdentityLock,
+  onDescribeSubject,
+  isDescribingSubject,
 }) => {
   const getPromptLabel = () => {
     switch(sceneSource) {
@@ -86,7 +94,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
       case 'reference':
         return "Contoh: pria itu berjalan santai di sepanjang jalan";
       case 'generate':
-        return "Contoh: seorang wanita tersenyum duduk di sofa di sebuah perpustakaan megah saat malam hari";
+        return "Contoh: [Gunakan tombol bantuan atau tulis manual] ...duduk di sofa di sebuah perpustakaan megah saat malam hari";
       default:
         return "Jelaskan apa yang harus dilakukan subjek...";
     }
@@ -118,14 +126,32 @@ export const InputPanel: React.FC<InputPanelProps> = ({
         </div>
 
         <div className="grid grid-cols-3 gap-3">
-          <div className="aspect-square">
-            <DropZone 
-              file={subjectImage}
-              onDrop={setSubjectImage}
-              title="2. Subjek"
-              description="Wajah & Identitas"
-              previewHeightClass="h-full"
-            />
+          <div className="flex flex-col gap-2">
+            <div className="aspect-square">
+                <DropZone 
+                  file={subjectImage}
+                  onDrop={setSubjectImage}
+                  title="2. Subjek"
+                  description="Wajah & Identitas"
+                  previewHeightClass="h-full"
+                />
+            </div>
+            {sceneSource === 'generate' && subjectImage && (
+                <Tooltip text={customIdentityLock ? "Kunci identitas superior dari beberapa gambar sedang aktif." : "Gunakan beberapa foto wajah untuk akurasi identitas yang lebih tinggi."}>
+                    {customIdentityLock ? (
+                         <div className="text-center text-xs font-bold text-green-300 bg-green-900/80 py-2 px-3 rounded-md cursor-default w-full">
+                            Identity Lock+ Aktif
+                         </div>
+                    ) : (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onOpenIdentityModal(); }} 
+                            className="w-full text-center text-xs font-semibold bg-amber-600 text-white py-2 px-3 rounded-md hover:bg-amber-500 transition-colors"
+                        >
+                            ✨ Buat Identity Lock+
+                        </button>
+                    )}
+                </Tooltip>
+            )}
           </div>
           
           <div className="aspect-square">
@@ -210,8 +236,8 @@ export const InputPanel: React.FC<InputPanelProps> = ({
             <label className="block text-xs font-medium text-slate-400 mb-2">6. PENGATURAN LANJUTAN</label>
              <div className="bg-slate-900 p-3 rounded-md border border-slate-700">
                 <div className="flex justify-between items-center">
-                    <Tooltip text="Saat diaktifkan, AI akan melakukan analisis pasca-proses untuk menyelaraskan color bleeding, grain, dan ketajaman antara subjek dan scene, menghasilkan integrasi yang lebih fotorealistis.">
-                        <label htmlFor="harmonization-toggle" className="flex items-center gap-2 cursor-pointer">
+                    <Tooltip text="Saat diaktifkan, AI akan melakukan analisis pasca-proses untuk menyelaraskan color bleeding, grain, dan ketajaman antara subjek dan scene, menghasilkan integrasi yang lebih fotorealistis. (Dinonaktifkan dalam mode 'Dari Prompt')">
+                        <label htmlFor="harmonization-toggle" className={`flex items-center gap-2 transition-opacity ${sceneSource === 'generate' ? 'opacity-50' : ''}`}>
                             <span className="text-xs font-medium text-slate-300">HARMONISASI AKHIR (REALISME+)</span>
                         </label>
                     </Tooltip>
@@ -221,7 +247,8 @@ export const InputPanel: React.FC<InputPanelProps> = ({
                       role="switch"
                       aria-checked={isHarmonizationEnabled}
                       onClick={() => setIsHarmonizationEnabled(!isHarmonizationEnabled)}
-                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-slate-800 ${isHarmonizationEnabled ? 'bg-amber-500' : 'bg-slate-600'}`}
+                      disabled={sceneSource === 'generate'}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-slate-800 ${isHarmonizationEnabled ? 'bg-amber-500' : 'bg-slate-600'} disabled:bg-slate-700 disabled:cursor-not-allowed`}
                     >
                       <span
                         aria-hidden="true"
@@ -237,14 +264,30 @@ export const InputPanel: React.FC<InputPanelProps> = ({
           <label htmlFor="prompt" className="block text-xs font-medium text-slate-400 mb-2">
             {getPromptLabel()}
           </label>
-          <textarea
-            id="prompt"
-            rows={3}
-            className="w-full p-2 border border-slate-600 bg-slate-900 rounded-md focus:ring-amber-500 focus:border-amber-500 text-sm placeholder:text-slate-500"
-            placeholder={getPromptPlaceholder()}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
+          <div className="relative">
+            <textarea
+              id="prompt"
+              rows={3}
+              className="w-full p-2 border border-slate-600 bg-slate-900 rounded-md focus:ring-amber-500 focus:border-amber-500 text-sm placeholder:text-slate-500 pr-28"
+              placeholder={getPromptPlaceholder()}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+            {sceneSource === 'generate' && (
+              <Tooltip text="Gunakan AI untuk mendeskripsikan pose dan outfit dari gambar subjek Anda secara otomatis. Hasilnya akan ditambahkan ke prompt ini.">
+                <div>
+                  <button 
+                    onClick={onDescribeSubject}
+                    disabled={!subjectImage || isDescribingSubject}
+                    className="absolute top-1/2 right-2 -translate-y-1/2 bg-slate-700 hover:bg-slate-600 text-amber-300 font-semibold text-xs py-1.5 px-2 rounded-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <SparklesIcon className={`w-4 h-4 ${isDescribingSubject ? 'animate-pulse' : ''}`} />
+                    {isDescribingSubject ? '...' : 'Bantu Deskripsi'}
+                  </button>
+                </div>
+              </Tooltip>
+            )}
+          </div>
         </div>
       </div>
     </Card>

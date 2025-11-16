@@ -7,7 +7,7 @@ import type {
   StylePreset,
   VFXSuggestions,
   PerspectiveAnalysisData,
-  PhotometricAnalysisData, // Added for photometric module
+  PhotometricAnalysisData, 
 } from '../../types';
 
 // Helper function to format a section of the prompt.
@@ -28,10 +28,23 @@ export const constructFinalPrompt = (
   pose: PoseAdaptationData | null,
   shadow: ShadowCastingData | null,
   perspective: PerspectiveAnalysisData | null,
-  photometric: PhotometricAnalysisData | null, // Added for photometric module
+  photometric: PhotometricAnalysisData | null, 
   style: StylePreset,
   resolution: Resolution
 ): string => {
+  // --- BRANCH 1: 'DARI PROMPT' (Simplified Flow) ---
+  if (sceneSource === 'generate') {
+    let briefing = `**VHMS DIRECTOR'S BRIEFING (Simplified Mode)**\n`;
+    briefing += `**Primary Goal:** A photorealistic image based on the user's full description.\n`;
+    briefing += formatSection("Identity Lock", analysis.identityLock);
+    briefing += `\n--USER DIRECTIVE--\n${userInput}`;
+    briefing += `\n\n**--- TECHNICAL DIRECTIVES ---**`;
+    briefing += formatSection("Style & Mood", `Render in a "${style}" style.`);
+    briefing += `\n\n**--- FINAL INSTRUCTION ---**\nGenerate a photorealistic, coherent image adhering strictly to all directives. The subject's facial identity, defined by the Identity Lock, is non-negotiable. The user directive contains the full description of the subject's pose, outfit, and the scene.`;
+    return briefing;
+  }
+  
+  // --- BRANCH 2: PRO MODES ('upload' & 'reference') ---
   let briefing = `**VHMS DIRECTOR'S BRIEFING**\n`;
   briefing += `**Primary Goal:** ${userInput}\n`;
 
@@ -40,23 +53,16 @@ export const constructFinalPrompt = (
   briefing += formatSection("Identity Lock", analysis.identityLock);
   briefing += formatSection("Subject Description", `A person with the locked identity, wearing: ${analysis.outfitDescription}.`);
   
-  // Use adapted pose if available, otherwise use original.
   const finalPose = pose?.adaptedPoseDescription || analysis.subjectPose;
   briefing += formatSection("Subject Pose & Action", `${userInput}. The subject's specific pose is: ${finalPose}.`);
 
-  // Scene description depends on the source.
-  if (sceneSource === 'generate') {
-    briefing += formatSection("Scene Description", `Create a scene based on this user prompt: "${userInput}". Additional scene details: ${analysis.sceneDescription}.`);
-  } else {
-    briefing += formatSection("Scene Description", "The scene is provided by the user-uploaded background/reference image. Adhere to its composition, lighting, and elements.");
-  }
+  briefing += formatSection("Scene Description", "The scene is provided by the user-uploaded background/reference image. Adhere to its composition, lighting, and elements.");
 
   // --- TECHNICAL DIRECTIVES ---
   briefing += `\n\n**--- TECHNICAL DIRECTIVES ---**`;
   briefing += formatSection("Style & Mood", `Render in a "${style}" style. The global mood is: ${photometric?.globalMood || 'determined by the scene'}.`);
   briefing += formatSection("Camera & Composition", `${analysis.cameraDetails}. Composition is ${analysis.sceneComposition}.`);
 
-  // Photometric data provides more detailed lighting info.
   if (photometric) {
     briefing += `\n--LIGHTING--`;
     briefing += `\n- Key Light: ${photometric.keyLight.direction}, ${photometric.keyLight.colorTemperature}, ${photometric.keyLight.intensity} intensity, ${photometric.keyLight.quality} quality.`;
@@ -71,7 +77,6 @@ export const constructFinalPrompt = (
   
   briefing += formatSection("Shadows", shadow?.shadowDescription || "Cast realistic shadows based on the lighting.");
   
-  // Integration details
   if (perspective || vfx?.smartInteraction) {
       briefing += `\n\n**--- INTEGRATION DETAILS ---**`;
       if (perspective) {

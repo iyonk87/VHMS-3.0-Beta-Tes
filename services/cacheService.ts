@@ -20,9 +20,10 @@ const generatePoseAdaptationKey = (subjectKey: string, interactionText: string) 
 const generateShadowDataKey = (poseText: string, interactionText: string) => `shadow-${poseText}-${interactionText}`;
 const generatePerspectiveKey = (fileKey: string) => `perspective-${fileKey}`;
 const generatePhotometricKey = (fileKey: string) => `photometric-${fileKey}`;
-// [PENAMBAHAN BARU] Key generator for Harmonization
 const generateHarmonizationKey = (fileKey: string) => `harmonized-${fileKey}`;
-
+const generateIdentityLockKey = (fileKey: string) => `identity-lock-${fileKey}`;
+// NEW: Key generator for simple subject description
+const generateSubjectDescriptionKey = (fileKey: string) => `subject-desc-${fileKey}`;
 
 /**
  * A simple in-memory cache service for the current session.
@@ -52,6 +53,39 @@ class CacheService {
     this.cache.set(key, data);
     console.log(`[CacheService] SET: Stored comprehensive data for key: ${key}`);
   }
+  
+  // --- Identity Lock+ ---
+  public getIdentityLock(files: FileWithPreview[]): string | null {
+    const key = generateIdentityLockKey(generateFileCacheKey(files));
+    const data = this.cache.get(key);
+    if (data) {
+        console.log(`[CacheService] HIT: Found Identity Lock for key: ${key}`);
+        return data;
+    }
+    return null;
+  }
+  public setIdentityLock(files: FileWithPreview[], lock: string): void {
+    const key = generateIdentityLockKey(generateFileCacheKey(files));
+    this.cache.set(key, lock);
+    console.log(`[CacheService] SET: Stored Identity Lock for key: ${key}`);
+  }
+  
+  // --- NEW: Subject Description Caching ---
+  public getSubjectDescription(subjectImage: FileWithPreview): string | null {
+    const key = generateSubjectDescriptionKey(generateFileCacheKey([subjectImage]));
+    const data = this.cache.get(key);
+    if (data) {
+        console.log(`[CacheService] HIT: Found Subject Description for key: ${key}`);
+        return data;
+    }
+    return null;
+  }
+  public setSubjectDescription(subjectImage: FileWithPreview, description: string): void {
+    const key = generateSubjectDescriptionKey(generateFileCacheKey([subjectImage]));
+    this.cache.set(key, description);
+    console.log(`[CacheService] SET: Stored Subject Description for key: ${key}`);
+  }
+
 
   // --- VFX Suggestions ---
   public getVFX(sceneImage: FileWithPreview): { data: VFXSuggestions, isCached: true } | null {
