@@ -423,23 +423,6 @@ export const generateIdentityLockFromImages = async (
     return result.identityLock;
 };
 
-export const generateSingleImageIdentityLock = async (
-    image: FileWithPreview,
-    modelSelection: AnalysisModelSelection
-): Promise<string> => {
-    const cached = cacheService.getIdentityLock([image]);
-    if (cached) return cached;
-
-    const parts: Part[] = [await fileToGenerativePart(image)];
-    const prompt = `Analyze this image of a person. Create and return a single, unified 'identityLock' string that captures their core facial features. The lock should be extremely detailed to ensure high-fidelity identity preservation.`;
-    parts.unshift({ text: prompt });
-
-    const result = await callGeminiAPI<{ identityLock: string }>(getModelName(modelSelection), parts, identityLockSchema);
-
-    cacheService.setIdentityLock([image], result.identityLock);
-    return result.identityLock;
-};
-
 export const describeSubjectImage = async (
     subjectImage: FileWithPreview,
     modelSelection: AnalysisModelSelection
@@ -481,7 +464,7 @@ const dataUrlToBlob = (dataUrl: string): Blob => {
 export const generateFinalImage = async (
   finalPrompt: string,
   sceneSource: SceneSource,
-  subjectImage: FileWithPreview,
+  subjectImage: FileWithPreview | null,
   sceneImage: FileWithPreview | null,
   referenceImage: FileWithPreview | null,
   interactionMask: string | null
@@ -490,7 +473,9 @@ export const generateFinalImage = async (
   
   let augmentedPrompt = finalPrompt;
 
-  parts.push(await fileToGenerativePart(subjectImage));
+  if (subjectImage) {
+    parts.push(await fileToGenerativePart(subjectImage));
+  }
 
   let baseImage: FileWithPreview | null = null;
   if (sceneSource === 'upload' && sceneImage) baseImage = sceneImage;

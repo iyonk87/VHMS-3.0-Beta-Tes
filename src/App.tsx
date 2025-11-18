@@ -282,24 +282,37 @@ const App: React.FC = () => {
             let finalConstructedPrompt: string;
             let currentUnifiedData: UnifiedAnalysisData | null = null;
             let currentDependentData: DependentAdaptationData | null = null;
-            let analysisForHarmonization: ComprehensiveAnalysisData;
+            let analysisForHarmonization: Partial<ComprehensiveAnalysisData>;
             
             // --- MODE: DARI PROMPT (Simplified Flow) ---
             if (sceneSource === 'generate') {
-                setAppStatus('ANALYZING_PRIMARY');
-                setStatusMessage('Mempersiapkan Aset Identitas...');
-                setProxyStatus('PENDING');
-
-                let finalIdentityLock: string;
-                if (customIdentityLock) {
-                    finalIdentityLock = customIdentityLock;
-                } else {
-                    finalIdentityLock = await geminiService.generateSingleImageIdentityLock(subjectImage!, analysisModels.subject);
-                }
+                let subjectForGeneration: FileWithPreview | null = null;
                 
-                // For this mode, we only need a partial analysis object for the prompt engine.
-                analysisForHarmonization = { identityLock: finalIdentityLock } as ComprehensiveAnalysisData;
-                setProxyStatus('SUCCESS');
+                if (customIdentityLock) {
+                    setAppStatus('ANALYZING_PRIMARY');
+                    setStatusMessage('Mempersiapkan Aset Identitas...');
+                    analysisForHarmonization = { identityLock: customIdentityLock };
+                    subjectForGeneration = subjectImage; 
+                    setProxyStatus('SUCCESS');
+                } else {
+                    analysisForHarmonization = {};
+                    subjectForGeneration = null; 
+                }
+
+                setStatusMessage('Membangun Prompt Final...');
+                finalConstructedPrompt = constructFinalPrompt(
+                    prompt, sceneSource, analysisForHarmonization, null, stylePreset, resolution
+                );
+                setFinalPrompt(finalConstructedPrompt);
+                
+                setAppStatus('GENERATING_IMAGE');
+                setStatusMessage('Menghasilkan Gambar Komposit...');
+                setProxyStatus('PENDING');
+                
+                let tempGeneratedImage = await geminiService.generateFinalImage(
+                    finalConstructedPrompt, sceneSource, subjectForGeneration, sceneImage, referenceImage, interactionMask
+                );
+                finalImageResult = tempGeneratedImage;
                 
             } 
             // --- MODE: LATAR BELAKANG / REFERENSI (Two-Call Pro Flow) ---
@@ -337,30 +350,28 @@ const App: React.FC = () => {
                 setDependentData(currentDependentData);
                 setIsDependentCached(isDependentCached);
                 analysisForHarmonization = currentUnifiedData;
-            }
 
-            // --- PROMPT CONSTRUCTION & IMAGE GENERATION (Applies to all modes) ---
-            setStatusMessage('Membangun Prompt Final...');
-            finalConstructedPrompt = constructFinalPrompt(
-                prompt, sceneSource, analysisForHarmonization, currentDependentData, stylePreset, resolution
-            );
-            setFinalPrompt(finalConstructedPrompt);
-            
-            setAppStatus('GENERATING_IMAGE');
-            setStatusMessage('Menghasilkan Gambar Komposit...');
-            setProxyStatus('PENDING');
-            let tempGeneratedImage = await geminiService.generateFinalImage(finalConstructedPrompt, sceneSource, subjectImage!, sceneImage, referenceImage, interactionMask);
-            setProxyStatus('SUCCESS');
-
-            if (isHarmonizationEnabled && sceneSource !== 'generate') {
-                setAppStatus('HARMONIZING');
-                setStatusMessage('Menjalankan Harmonisasi Akhir...');
+                setStatusMessage('Membangun Prompt Final...');
+                finalConstructedPrompt = constructFinalPrompt(
+                    prompt, sceneSource, analysisForHarmonization, currentDependentData, stylePreset, resolution
+                );
+                setFinalPrompt(finalConstructedPrompt);
+                
+                setAppStatus('GENERATING_IMAGE');
+                setStatusMessage('Menghasilkan Gambar Komposit...');
                 setProxyStatus('PENDING');
-                tempGeneratedImage = await geminiService.performHarmonization(tempGeneratedImage, analysisForHarmonization);
-                setProxyStatus('SUCCESS');
+                let tempGeneratedImage = await geminiService.generateFinalImage(finalConstructedPrompt, sceneSource, subjectImage!, sceneImage, referenceImage, interactionMask);
+                
+                if (isHarmonizationEnabled) {
+                    setAppStatus('HARMONIZING');
+                    setStatusMessage('Menjalankan Harmonisasi Akhir...');
+                    setProxyStatus('PENDING');
+                    tempGeneratedImage = await geminiService.performHarmonization(tempGeneratedImage, analysisForHarmonization as ComprehensiveAnalysisData);
+                }
+                finalImageResult = tempGeneratedImage;
             }
-            finalImageResult = tempGeneratedImage;
-            
+
+            setProxyStatus('SUCCESS');
             setOutputImage(finalImageResult);
             setAppStatus('DONE');
             setStatusMessage('');

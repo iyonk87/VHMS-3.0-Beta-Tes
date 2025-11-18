@@ -21,25 +21,36 @@ const formatSection = (title: string, content: string | undefined | null): strin
 export const constructFinalPrompt = (
   userInput: string,
   sceneSource: SceneSource,
-  unifiedData: UnifiedAnalysisData | ComprehensiveAnalysisData, // Accept both for backward compatibility during transition
+  analysisData: Partial<ComprehensiveAnalysisData & UnifiedAnalysisData>,
   dependentData: DependentAdaptationData | null,
   style: StylePreset,
   resolution: Resolution
 ): string => {
   // --- BRANCH 1: 'DARI PROMPT' (Simplified Flow) ---
   if (sceneSource === 'generate') {
-    let briefing = `**VHMS DIRECTOR'S BRIEFING (Simplified Mode)**\n`;
+    let briefing = `**VHMS DIRECTOR'S BRIEFING (Prompt Mode)**\n`;
     briefing += `**Primary Goal:** A photorealistic image based on the user's full description.\n`;
-    briefing += formatSection("Identity Lock", unifiedData.identityLock);
+
+    // Conditionally add the Identity Lock section
+    if (analysisData.identityLock) {
+        briefing += formatSection("Identity Lock", analysisData.identityLock);
+    }
+
     briefing += `\n--USER DIRECTIVE--\n${userInput}`;
     briefing += `\n\n**--- TECHNICAL DIRECTIVES ---**`;
     briefing += formatSection("Style & Mood", `Render in a "${style}" style.`);
-    briefing += `\n\n**--- FINAL INSTRUCTION ---**\nGenerate a photorealistic, coherent image adhering strictly to all directives. The subject's facial identity, defined by the Identity Lock, is non-negotiable. The user directive contains the full description of the subject's pose, outfit, and the scene.`;
+    
+    if (analysisData.identityLock) {
+         briefing += `\n\n**--- FINAL INSTRUCTION ---**\nGenerate a photorealistic, coherent image adhering strictly to all directives. The subject's facial identity, defined by the Identity Lock, is non-negotiable. The user directive contains the full description of the subject's pose, outfit, and the scene.`;
+    } else {
+         briefing += `\n\n**--- FINAL INSTRUCTION ---**\nGenerate a photorealistic, coherent image based purely on the User Directive. There is no specific subject identity to preserve; create a scene as described.`;
+    }
     return briefing;
   }
   
   // --- BRANCH 2: PRO MODES ('upload' & 'reference') ---
   // Type guard to ensure we're working with the full UnifiedAnalysisData
+  const unifiedData = analysisData as UnifiedAnalysisData;
   if (!('vfx' in unifiedData)) {
     console.error("PromptEngine: Incorrect data type passed for Pro modes. Expected UnifiedAnalysisData.");
     return `Error: Data analisis tidak lengkap untuk membuat prompt.`;
