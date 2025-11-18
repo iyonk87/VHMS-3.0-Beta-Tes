@@ -6,11 +6,11 @@ import {
 import { AnalysisPanel } from './AnalysisPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { FacialVectorPanel } from './FacialVectorPanel';
+import type { ActivePanel } from '../types';
 
 type AnalysisPanelProps = React.ComponentProps<typeof AnalysisPanel>;
 type HistoryPanelProps = React.ComponentProps<typeof HistoryPanel>;
 type FacialVectorPanelProps = React.ComponentProps<typeof FacialVectorPanel>;
-export type ActivePanel = 'analysis' | 'history' | 'vector';
 
 interface ControlDeckProps {
   isCollapsed: boolean;
@@ -33,7 +33,7 @@ const AccordionItem: React.FC<{
     <div className="border-b border-slate-700">
       <button
         onClick={onToggle}
-        className="w-full flex justify-between items-center p-3 text-left text-sm font-semibold text-slate-200 hover:bg-slate-700/50"
+        className="w-full flex justify-between items-center p-3 text-left text-sm font-semibold text-slate-200 hover:bg-slate-700/50 transition-colors"
       >
         <span className="flex items-center gap-2">
           {icon}

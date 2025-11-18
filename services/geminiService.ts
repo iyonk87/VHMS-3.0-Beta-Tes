@@ -3,14 +3,12 @@ import type {
   ComprehensiveAnalysisData,
   FileWithPreview,
   SceneSource,
-  VFXSuggestions,
-  PoseAdaptationData,
-  ShadowCastingData,
-  PerspectiveAnalysisData,
-  PhotometricAnalysisData,
-  AnalysisModelSelection
+  AnalysisModelSelection,
+  UnifiedAnalysisData,
+  DependentAdaptationData
 } from '../types';
 import { cacheService } from './cacheService';
+import { config } from './configService';
 
 // Helper to convert File object to a base64 string for the API.
 const fileToGenerativePart = async (file: File | Blob, mimeTypeOverride?: string): Promise<Part> => {
@@ -66,12 +64,10 @@ const handleGeminiError = (error: any): never => {
 
   const errorMessage = error.message || JSON.stringify(error);
   
-  // 1. Tangani Error Kunci API Hilang/Invalid dengan pesan yang jelas
   if (errorMessage.includes("API key") || errorMessage.includes("FATAL_NO_API_KEY_FOUND")) {
        throw new Error("Kunci API tidak ditemukan. Pastikan VITE_GEMINI_API_KEY telah diatur dengan benar di environment variables Anda.");
   }
 
-  // 2. Tangani Error 429 (Resource Exhausted / Quota Exceeded)
   if (
     error.status === 429 ||
     errorMessage.includes("429") ||
@@ -217,11 +213,38 @@ const identityLockSchema = {
     required: ['identityLock'],
 };
 
+// --- NEW: VHMS v3.1 Schemas for "Two-Call" Architecture ---
+
+const unifiedAnalysisSchema = {
+    type: Type.OBJECT,
+    properties: {
+        ...subjectAnalysisSchema.properties,
+        ...sceneAnalysisSchema.properties,
+        vfx: vfxSchema,
+        perspective: perspectiveSchema,
+        photometric: photometricSchema,
+    },
+    required: [
+        'subjectPose', 'identityLock', 'outfitDescription', 'facsAnalysis', 'landmarks',
+        'lighting', 'lightingEffectOnSubject', 'sceneComposition', 'colorPalette', 'sceneDescription', 'cameraDetails', 'depthAnalysis',
+        'vfx', 'perspective', 'photometric'
+    ]
+};
+
+const dependentAdaptationSchema = {
+    type: Type.OBJECT,
+    properties: {
+        pose: poseSchema,
+        shadow: shadowSchema,
+    },
+    required: ['pose', 'shadow']
+};
+
 
 // --- Generic API Call Helpers ---
 
 const getModelName = (selection: AnalysisModelSelection): string => {
-  return selection === 'Pro' ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
+  return selection === 'Pro' ? config.models.pro : config.models.fast;
 };
 
 async function callGeminiAPI<T>(modelName: string, promptParts: Part[], schema: object): Promise<T> {
@@ -310,80 +333,73 @@ async function callGeminiImageAPI(modelName: string, promptParts: Part[]): Promi
   }
 }
 
-// --- Primary Analysis Pipeline ---
+// --- NEW V3.1: UNIFIED ANALYSIS PIPELINE (CALL 1) ---
 
-const analyzeSubject = async (
-    subjectImage: FileWithPreview, 
-    outfitImage: FileWithPreview | null,
-    modelSelection: AnalysisModelSelection
-) => {
-    const parts: Part[] = [await fileToGenerativePart(subjectImage)];
-    let prompt = "Analyze the provided subject image for identity locking, pose, facial expression (using FACS), and key landmarks.";
-    if(outfitImage){
-        parts.push(await fileToGenerativePart(outfitImage));
-        prompt += "\nA second image is provided as an outfit reference. Describe this outfit for the subject.";
-    }
-    parts.unshift({ text: prompt });
-    return callGeminiAPI<any>(getModelName(modelSelection), parts, subjectAnalysisSchema);
-};
-
-const analyzeScene = async (
-    sceneImage: FileWithPreview | null, 
-    referenceImage: FileWithPreview | null, 
-    sceneSource: SceneSource, 
-    prompt: string,
-    modelSelection: AnalysisModelSelection
-) => {
-    const noImageAvailable = (sceneSource === 'upload' && !sceneImage) || (sceneSource === 'reference' && !referenceImage);
-    if (sceneSource === 'generate' || noImageAvailable) {
-        return {
-            lighting: "Inferred from prompt",
-            lightingEffectOnSubject: "To be determined by AI based on prompt",
-            sceneComposition: "Balanced composition",
-            colorPalette: { dominant: [], accent: [] },
-            sceneDescription: `Generated from prompt: "${prompt}"`,
-            cameraDetails: "Standard DSLR look",
-            depthAnalysis: { depthDescription: "N/A", occlusionSuggestion: "", interactionPoints: [] }
-        };
-    }
-
-    const imageToAnalyze = sceneSource === 'upload' ? sceneImage : referenceImage;
-    const parts: Part[] = [await fileToGenerativePart(imageToAnalyze!)];
-    const analysisPrompt = `Analyze the provided scene image for lighting, composition, color palette, camera details, and depth. The user's goal is: "${prompt}".`;
-    parts.unshift({ text: analysisPrompt });
-    
-    return callGeminiAPI<any>(getModelName(modelSelection), parts, sceneAnalysisSchema);
-};
-
-export const performComprehensiveAnalysis = async (
+export const performUnifiedAnalysis = async (
   subjectImage: FileWithPreview,
-  sceneImage: FileWithPreview | null,
-  referenceImage: FileWithPreview | null,
+  sceneImage: FileWithPreview, // In pro modes, this is required.
   outfitImage: FileWithPreview | null,
-  sceneSource: SceneSource,
   prompt: string,
-  subjectModel: AnalysisModelSelection,
-  sceneModel: AnalysisModelSelection
-): Promise<{ data: ComprehensiveAnalysisData, isCached: boolean }> => {
-  const cacheKeyFiles = [subjectImage, sceneImage, referenceImage, outfitImage].filter(Boolean);
-  const cached = cacheService.getComprehensive<ComprehensiveAnalysisData>(cacheKeyFiles);
+  modelSelection: AnalysisModelSelection
+): Promise<{ data: UnifiedAnalysisData, isCached: boolean }> => {
+  const cacheKeyFiles = [subjectImage, sceneImage, outfitImage].filter(Boolean);
+  const cached = cacheService.getUnifiedAnalysis(cacheKeyFiles);
   if (cached) return { data: cached, isCached: true };
 
-  console.log("[GeminiService] Starting Sequential Micro-Analysis Pipeline...");
+  console.log("[GeminiService V3.1] Executing Unified Analysis Call (1/2)...");
 
-  // Run analyses sequentially to avoid rate limiting on initial burst.
-  const subjectData = await analyzeSubject(subjectImage, outfitImage, subjectModel);
-  const sceneData = await analyzeScene(sceneImage, referenceImage, sceneSource, prompt, sceneModel);
+  const subjectPart = await fileToGenerativePart(subjectImage);
+  const scenePart = await fileToGenerativePart(sceneImage);
+  const parts: Part[] = [subjectPart, scenePart];
 
-  const mergedData: ComprehensiveAnalysisData = {
-    ...subjectData,
-    ...sceneData
-  };
-    
-  console.log("[GeminiService] Micro-Analysis Pipeline complete. Merged data.");
-  cacheService.setComprehensive(cacheKeyFiles, mergedData);
-  return { data: mergedData, isCached: false };
+  let analysisPrompt = `You are VHMS, an expert multi-modal analysis engine. Analyze the provided subject and scene images to create a photorealistic composite. The user's goal is: "${prompt}". Fill the entire JSON schema with a comprehensive, integrated analysis covering the subject, scene, VFX, perspective, and photometric lighting.`;
+  
+  if (outfitImage) {
+    parts.push(await fileToGenerativePart(outfitImage));
+    analysisPrompt += "\nAn additional image is provided as an outfit reference. Use this for the 'outfitDescription'.";
+  }
+
+  parts.unshift({ text: analysisPrompt });
+
+  const data = await callGeminiAPI<UnifiedAnalysisData>(getModelName(modelSelection), parts, unifiedAnalysisSchema);
+  cacheService.setUnifiedAnalysis(cacheKeyFiles, data);
+  return { data, isCached: false };
 };
+
+
+// --- NEW V3.1: DEPENDENT ADAPTATION PIPELINE (CALL 2) ---
+
+export const performDependentAdaptations = async (
+  unifiedData: UnifiedAnalysisData,
+  subjectImage: FileWithPreview,
+  modelSelection: AnalysisModelSelection
+): Promise<{ data: DependentAdaptationData, isCached: boolean }> => {
+    const interactionDescription = unifiedData.vfx.smartInteraction?.placementSuggestion || "No specific interaction";
+    const cached = cacheService.getDependentAdaptations(subjectImage, interactionDescription, unifiedData.lighting);
+    if (cached) return { data: cached, isCached: true };
+
+    console.log("[GeminiService V3.1] Executing Dependent Adaptation Call (2/2)...");
+
+    const subjectPart = await fileToGenerativePart(subjectImage);
+    
+    const prompt = `Given this comprehensive scene and subject analysis:
+    - Original Subject Pose: "${unifiedData.subjectPose}"
+    - Smart Interaction Suggestion: "${interactionDescription}"
+    - Scene Lighting: "${unifiedData.lighting}"
+    
+    Your task is to perform the dependent adaptations:
+    1.  **Adapt Pose:** Describe a new, realistic pose for the subject that incorporates the smart interaction.
+    2.  **Generate Shadow:** Based on the newly adapted pose and the scene lighting, describe the shadow the subject should cast.
+    
+    Fill the entire JSON schema with the results.`;
+
+    const parts: Part[] = [subjectPart, { text: prompt }];
+
+    const data = await callGeminiAPI<DependentAdaptationData>(getModelName(modelSelection), parts, dependentAdaptationSchema);
+    cacheService.setDependentAdaptations(subjectImage, interactionDescription, unifiedData.lighting, data);
+    return { data, isCached: false };
+}
+
 
 // --- 'Dari Prompt' Mode Specific Functions ---
 
@@ -407,7 +423,6 @@ export const generateIdentityLockFromImages = async (
     return result.identityLock;
 };
 
-// NEW: Generates a basic identity lock from a single image. A necessary fallback.
 export const generateSingleImageIdentityLock = async (
     image: FileWithPreview,
     modelSelection: AnalysisModelSelection
@@ -425,7 +440,6 @@ export const generateSingleImageIdentityLock = async (
     return result.identityLock;
 };
 
-// NEW: Function for the "AI Assist" button. Generates a simple text description.
 export const describeSubjectImage = async (
     subjectImage: FileWithPreview,
     modelSelection: AnalysisModelSelection
@@ -443,100 +457,7 @@ export const describeSubjectImage = async (
     return description;
 };
 
-
-// --- Secondary Analysis Functions ---
-
-export const getVFXSuggestions = async (
-  sceneImage: FileWithPreview,
-  primaryData: ComprehensiveAnalysisData,
-  modelSelection: AnalysisModelSelection
-): Promise<{ data: VFXSuggestions, isCached: boolean }> => {
-  const cached = cacheService.getVFX(sceneImage);
-  if (cached) return cached;
-
-  const scenePart = await fileToGenerativePart(sceneImage);
-  const textPart = { text: `Given the scene image and this analysis:
-    - Lighting: ${primaryData.lighting}
-    - Composition: ${primaryData.sceneComposition}
-    - Depth/Occlusion: ${primaryData.depthAnalysis.depthDescription}
-    Suggest one 'smart interaction' point for a subject (e.g., "leaning against the railing") and a refined lighting suggestion to enhance realism.`
-  };
-
-  const data = await callGeminiAPI<VFXSuggestions>(getModelName(modelSelection), [scenePart, textPart], vfxSchema);
-  cacheService.setVFX(sceneImage, data);
-  return { data, isCached: false };
-};
-
-export const adaptPoseForInteraction = async (
-  subjectImage: FileWithPreview,
-  originalPose: string,
-  interactionDescription: string,
-  modelSelection: AnalysisModelSelection
-): Promise<{ data: PoseAdaptationData, isCached: boolean }> => {
-    const cached = cacheService.getPoseAdaptation(subjectImage, interactionDescription);
-    if (cached) return cached;
-    
-    const subjectPart = await fileToGenerativePart(subjectImage);
-    const textPart = { text: `The subject's current pose is: "${originalPose}". Adapt this pose to realistically interact with this element: "${interactionDescription}". Describe the new pose and provide a confidence score.` };
-
-    const data = await callGeminiAPI<PoseAdaptationData>(getModelName(modelSelection), [subjectPart, textPart], poseSchema);
-    cacheService.setPoseAdaptation(subjectImage, interactionDescription, data);
-    return { data, isCached: false };
-};
-
-export const generateShadowDescription = async (
-  adaptedPose: string,
-  interaction: string,
-  lighting: string,
-  modelSelection: AnalysisModelSelection
-): Promise<{ data: ShadowCastingData, isCached: boolean }> => {
-    const cached = cacheService.getShadowData(adaptedPose, interaction);
-    if (cached) return cached;
-
-    const textPart = { text: `A subject is in this pose: "${adaptedPose}", interacting with "${interaction}". The scene lighting is: "${lighting}". Describe the shadow the subject should cast, including its direction and softness (hard, soft, or diffuse).` };
-    
-    const data = await callGeminiAPI<ShadowCastingData>(getModelName(modelSelection), [textPart], shadowSchema);
-    cacheService.setShadowData(adaptedPose, interaction, data);
-    return { data, isCached: false };
-};
-
-export const analyzeScenePerspective = async (
-  sceneImage: FileWithPreview,
-  modelSelection: AnalysisModelSelection
-): Promise<{ data: PerspectiveAnalysisData, isCached: boolean }> => {
-    const cached = cacheService.getPerspective(sceneImage);
-    if (cached) return cached;
-
-    const scenePart = await fileToGenerativePart(sceneImage);
-    const textPart = { text: "Analyze the perspective, vanishing point, and relative scale of this scene. Provide a recommended scale factor (as a float, e.g., 0.85) for a human subject to be realistically placed within it. A scale of 1.0 means the subject is at a neutral middle-ground depth." };
-
-    const data = await callGeminiAPI<PerspectiveAnalysisData>(getModelName(modelSelection), [scenePart, textPart], perspectiveSchema);
-    cacheService.setPerspective(sceneImage, data);
-    return { data, isCached: false };
-};
-
-export const performPhotometricAnalysis = async (
-  sceneImage: FileWithPreview,
-  primaryLightingDescription: string,
-  modelSelection: AnalysisModelSelection
-): Promise<{ data: PhotometricAnalysisData, isCached: boolean }> => {
-    const cached = cacheService.getPhotometricData(sceneImage);
-    if (cached) return cached;
-
-    const scenePart = await fileToGenerativePart(sceneImage);
-    const textPart = { text: `You are an expert Director of Photography. Deconstruct the lighting of the provided scene image. The initial lighting assessment is: "${primaryLightingDescription}". Your task is to provide a technical, multi-point lighting plan.
-    - Identify the single Key Light (main light source).
-    - Identify the Fill Light (light filling in shadows).
-    - Identify if a Rim Light is present (light separating subject from background).
-    - Describe any ambient or bounce light.
-    - Summarize the global mood.
-    Fill the provided JSON schema with precise, actionable details.` 
-    };
-
-    const data = await callGeminiAPI<PhotometricAnalysisData>(getModelName(modelSelection), [scenePart, textPart], photometricSchema);
-    cacheService.setPhotometricData(sceneImage, data);
-    return { data, isCached: false };
-};
+// --- Image Generation & Post-Processing ---
 
 const dataUrlToBlob = (dataUrl: string): Blob => {
     const arr = dataUrl.split(',');
@@ -569,10 +490,8 @@ export const generateFinalImage = async (
   
   let augmentedPrompt = finalPrompt;
 
-  // Add subject image
   parts.push(await fileToGenerativePart(subjectImage));
 
-  // Add scene/reference image
   let baseImage: FileWithPreview | null = null;
   if (sceneSource === 'upload' && sceneImage) baseImage = sceneImage;
   if (sceneSource === 'reference' && referenceImage) baseImage = referenceImage;
@@ -581,20 +500,17 @@ export const generateFinalImage = async (
     parts.push(await fileToGenerativePart(baseImage));
   }
 
-  // Handle interaction mask if it exists
   if (interactionMask) {
     console.log("[GeminiService] Interaction mask found. Augmenting prompt and adding mask part.");
     augmentedPrompt += "\n\n**--- MASKING & OCCLUSION DIRECTIVE ---**\nA black and white interaction mask is provided as an image part. The subject must appear BEHIND the white areas of this mask to create a realistic occlusion effect with foreground elements.";
 
     const maskBlob = dataUrlToBlob(interactionMask);
-    // Use a specific mimeType for the mask
     parts.push(await fileToGenerativePart(maskBlob, 'image/png'));
   }
   
-  // The text prompt should be the first part in the array for many multi-modal models.
   parts.unshift({ text: augmentedPrompt });
 
-  return callGeminiImageAPI('gemini-2.5-flash-image', parts);
+  return callGeminiImageAPI(config.models.image, parts);
 };
 
 export const performHarmonization = async (
@@ -622,7 +538,7 @@ The final output must be only the enhanced, photorealistic image. It should look
   `;
   const textPart = { text: harmonizationPrompt };
 
-  return callGeminiImageAPI('gemini-2.5-flash-image', [textPart, imagePart]);
+  return callGeminiImageAPI(config.models.image, [textPart, imagePart]);
 };
 
 export const generateObjectMask = async (
@@ -632,7 +548,7 @@ export const generateObjectMask = async (
   const scenePart = await fileToGenerativePart(sceneImage);
   const textPart = { text: `Generate a black and white segmentation mask for the following object in the image: "${occlusionSuggestion}". The object(s) of interest MUST be solid white (#FFFFFF) and the entire background MUST be solid black (#000000). Do not include any shades of gray, text, or other elements. The output must be only the binary mask.` };
   
-  return callGeminiImageAPI('gemini-2.5-flash-image', [scenePart, textPart]);
+  return callGeminiImageAPI(config.models.image, [scenePart, textPart]);
 };
 
 export const performInpainting = async (
@@ -647,5 +563,5 @@ export const performInpainting = async (
   const maskPart = await fileToGenerativePart(maskBlob, 'image/png'); 
   const textPart = { text: `You are an expert inpainting model. Use the second image as a mask. The white areas of the mask indicate the region to modify in the first image. Fill the masked region according to this instruction: "${inpaintPrompt}". The result should be seamless and photorealistic.` };
 
-  return callGeminiImageAPI('gemini-2.5-flash-image', [imagePart, maskPart, textPart]);
+  return callGeminiImageAPI(config.models.image, [imagePart, maskPart, textPart]);
 };

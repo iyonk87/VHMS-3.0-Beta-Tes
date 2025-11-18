@@ -121,6 +121,22 @@ export interface SecondaryAnalysisModuleState {
     cached: boolean;
 }
 
+// --- VHMS v3.1: "Two-Call" Architecture Types ---
+
+// NEW: Represents the combined result of the first, unified analysis call.
+export interface UnifiedAnalysisData extends ComprehensiveAnalysisData {
+    vfx: VFXSuggestions;
+    perspective: PerspectiveAnalysisData;
+    photometric: PhotometricAnalysisData;
+}
+
+// NEW: Represents the combined result of the second, dependent analysis call.
+export interface DependentAdaptationData {
+    pose: PoseAdaptationData;
+    shadow: ShadowCastingData;
+}
+
+
 // --- UI and State Management ---
 
 // Defines the global status of the application for the state machine.
@@ -133,6 +149,10 @@ export type AppStatus =
   | 'HARMONIZING'     // Post-processing the image
   | 'DONE'          // Process complete, image is displayed
   | 'ERROR';        // An error occurred
+
+// FIX: Added ProxyStatus type to fix import errors.
+// Defines the status of the backend proxy for UI feedback.
+export type ProxyStatus = 'IDLE' | 'PENDING' | 'SUCCESS' | 'ERROR';
 
 // NEW: Defines the model selection for secondary analysis modules.
 export type AnalysisModelSelection = 'Pro' | 'Fast';
@@ -147,6 +167,10 @@ export interface AnalysisModelsState {
     perspective: AnalysisModelSelection;
     photometric: AnalysisModelSelection;
 }
+
+// FIX: Added ActivePanel type to fix import error in App.tsx.
+// Defines the active panel in the Control Deck.
+export type ActivePanel = 'analysis' | 'history' | 'vector';
 
 // The structure of an item in the generation history.
 export interface HistoryItem {
@@ -165,16 +189,13 @@ export interface HistoryItem {
     };
 }
 
+// FIX: Completed the VerificationResult interface to match its usage in the app.
 // The result of the input verification process.
 export interface VerificationResult {
     subject: { valid: boolean; message: string };
-    // FIX: Allow 'success' as a valid type for the scene verification message.
     scene: { valid: boolean; message: string; type?: 'info' | 'success' };
     outfit: { valid: boolean; message: string; type?: 'info' };
     prompt: { valid: boolean; message: string };
     overall: { valid: boolean; message: string };
     promptSnippet: string;
 }
-
-// NEW: Defines the real-time status of the backend proxy connection.
-export type ProxyStatus = 'IDLE' | 'PENDING' | 'SUCCESS' | 'ERROR';

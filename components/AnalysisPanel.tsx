@@ -1,28 +1,25 @@
 import React from 'react';
 import type { 
-    ComprehensiveAnalysisData, VFXSuggestions, PoseAdaptationData, ShadowCastingData, 
-    PerspectiveAnalysisData, RegeneratableModule, SecondaryAnalysisModuleState, PhotometricAnalysisData, 
-    SceneSource, AnalysisModelsState, AnalysisModelSelection
+    RegeneratableModule, SecondaryAnalysisModuleState, 
+    SceneSource, AnalysisModelsState, AnalysisModelSelection,
+    UnifiedAnalysisData, DependentAdaptationData
 } from '../types';
 import { Card } from './common/Card';
 import { Tooltip } from './common/Tooltip';
 import { 
-    LayersIcon, CheckCircleIcon, XCircleIcon, RefreshIcon,
+    LayersIcon, CheckCircleIcon, RefreshIcon,
     MagicWandIcon, PersonPoseIcon, SunIcon, BlueprintIcon,
     PaletteIcon, EditIcon, TrashIcon
 } from './icons/Icons';
 
 interface AnalysisPanelProps {
-  analysisData: ComprehensiveAnalysisData | null;
+  unifiedData: UnifiedAnalysisData | null;
+  dependentData: DependentAdaptationData | null;
   isLoading: boolean;
   error: string | null;
-  isCached: boolean;
-  vfxData: VFXSuggestions | null;
-  poseData: PoseAdaptationData | null;
-  shadowData: ShadowCastingData | null;
-  perspectiveData: PerspectiveAnalysisData | null;
-  photometricData: PhotometricAnalysisData | null;
-  secondaryAnalysisState: Record<RegeneratableModule, SecondaryAnalysisModuleState>;
+  isUnifiedCached: boolean;
+  isDependentCached: boolean;
+  secondaryAnalysisState: Record<RegeneratableModule, SecondaryAnalysisModuleState>; // Kept for future individual regeneration
   onRegenerate: (module: RegeneratableModule) => void;
   sceneSource: SceneSource;
   analysisModels: AnalysisModelsState;
@@ -36,15 +33,16 @@ const Shimmer: React.FC = () => <div className="w-full h-4 bg-slate-700 rounded 
 const ModuleCard: React.FC<{
     title: string;
     icon: React.ReactNode;
-    state: SecondaryAnalysisModuleState;
+    state: SecondaryAnalysisModuleState; // Keep for individual loading spinners later
     onRegenerate: () => void;
     children: React.ReactNode;
     isDataAvailable: boolean;
     isDisabled?: boolean;
     tooltipText: string;
     modelValue?: AnalysisModelSelection;
+    isCached: boolean;
 }> = ({ 
-    title, icon, state, onRegenerate, children, isDataAvailable, isDisabled = false, tooltipText, modelValue
+    title, icon, state, onRegenerate, children, isDataAvailable, isDisabled = false, tooltipText, modelValue, isCached
 }) => {
     return (
         <div className={`bg-slate-900/70 p-3 rounded-md border ${state.error ? 'border-red-700/50' : 'border-slate-700/50'}`}>
@@ -53,11 +51,11 @@ const ModuleCard: React.FC<{
                     {icon} {title}
                 </h3>
                 <div className="flex items-center gap-2">
-                    {state.cached && !state.loading && <Tooltip text="Data ini dimuat dari cache sesi untuk mempercepat proses."><span className="text-xs text-teal-400 font-semibold">Cached</span></Tooltip>}
+                    {isCached && !state.loading && <Tooltip text="Data ini dimuat dari cache sesi untuk mempercepat proses."><span className="text-xs text-teal-400 font-semibold">Cached</span></Tooltip>}
                     
-                    <Tooltip text={isDisabled ? `Modul ini bergantung pada hasil dari modul sebelumnya.` : `Buat ulang analisis untuk modul ${title} saja.`}>
+                    <Tooltip text={isDisabled ? `Modul ini bergantung pada hasil dari modul sebelumnya.` : `(Segera Hadir) Buat ulang analisis untuk modul ${title} saja.`}>
                        <div>
-                         <button onClick={onRegenerate} disabled={state.loading || isDisabled} className="disabled:opacity-50 disabled:cursor-not-allowed">
+                         <button onClick={onRegenerate} disabled={state.loading || isDisabled || true} className="disabled:opacity-50 disabled:cursor-not-allowed">
                              <RefreshIcon className={`w-4 h-4 ${state.loading ? 'animate-spin text-amber-400' : 'text-slate-400 hover:text-amber-400'}`} />
                          </button>
                        </div>
@@ -77,16 +75,15 @@ const ModuleCard: React.FC<{
                 )}
                 {state.error && <p className="text-red-400">Error: {state.error}</p>}
                 {!state.loading && !state.error && isDataAvailable && children}
-                {!state.loading && !state.error && !isDataAvailable && !isDisabled && <p className="italic text-slate-500">Menunggu analisis primer...</p>}
-                {!state.loading && !state.error && !isDataAvailable && isDisabled && <p className="italic text-slate-500">Menunggu modul sebelumnya...</p>}
+                {!state.loading && !state.error && !isDataAvailable && !isDisabled && <p className="italic text-slate-500">Menunggu analisis...</p>}
+                {!state.loading && !state.error && !isDataAvailable && isDisabled && <p className="italic text-slate-500">Menunggu data terpadu...</p>}
             </div>
         </div>
     );
 };
 
 export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ 
-    analysisData, isLoading, error, isCached,
-    vfxData, poseData, shadowData, perspectiveData, photometricData,
+    unifiedData, dependentData, isLoading, error, isUnifiedCached, isDependentCached,
     secondaryAnalysisState, onRegenerate,
     sceneSource, analysisModels,
     interactionMask, onOpenMaskEditor, onClearMask,
@@ -110,31 +107,31 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
             <p className="text-sm text-red-400 p-3">Terjadi kesalahan analisis: {error}</p>
         )}
         
-        {!isLoading && !error && !analysisData && (
+        {!isLoading && !error && !unifiedData && (
             <div className="text-center py-8 text-slate-500">
                 <LayersIcon className="w-12 h-12 mx-auto opacity-30" />
                 <p className="mt-2 font-semibold">Menunggu Analisis AI</p>
-                <p className="text-xs mt-1">Lengkapi input dan klik "Verifikasi Input" untuk memulai.</p>
+                <p className="text-xs mt-1">Lengkapi input dan klik "Mulai Generasi" untuk memulai.</p>
             </div>
         )}
         
-        {analysisData && (
+        {unifiedData && (
           <div className="space-y-3">
                 <div className="p-3 bg-slate-900/50 rounded-md border border-slate-700/50 text-xs text-slate-400 space-y-2">
                     <div className="flex justify-between items-center">
                         <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
                             <LayersIcon className="w-4 h-4"/> Rangkuman Analisis Primer
                         </h3>
-                        {isCached && <Tooltip text="Data ini dimuat dari cache sesi."><span className="text-xs text-teal-400 font-semibold">Cached</span></Tooltip>}
+                        {isUnifiedCached && <Tooltip text="Data ini dimuat dari cache sesi."><span className="text-xs text-teal-400 font-semibold">Cached</span></Tooltip>}
                     </div>
                     <div className="space-y-1">
-                        <p><strong>Komposisi:</strong> {analysisData.sceneComposition}</p>
-                        <p><strong>Pencahayaan:</strong> {analysisData.lighting}</p>
-                        <p><strong>Kamera:</strong> {analysisData.cameraDetails}</p>
-                        {analysisData.depthAnalysis.occlusionSuggestion && (
+                        <p><strong>Komposisi:</strong> {unifiedData.sceneComposition}</p>
+                        <p><strong>Pencahayaan:</strong> {unifiedData.lighting}</p>
+                        <p><strong>Kamera:</strong> {unifiedData.cameraDetails}</p>
+                        {unifiedData.depthAnalysis.occlusionSuggestion && (
                             <div className="pt-2 mt-2 border-t border-slate-700/50">
                                 <p className="font-semibold text-slate-300">Saran Interaksi Kedalaman:</p>
-                                <p>"{analysisData.depthAnalysis.occlusionSuggestion}"</p>
+                                <p>"{unifiedData.depthAnalysis.occlusionSuggestion}"</p>
                                 <div className="mt-2 flex items-center gap-3">
                                     <button
                                         onClick={onOpenMaskEditor}
@@ -166,15 +163,16 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                             icon={<MagicWandIcon className="w-4 h-4" />}
                             state={secondaryAnalysisState.vfx}
                             onRegenerate={() => onRegenerate('vfx')}
-                            isDataAvailable={!!vfxData}
+                            isDataAvailable={!!unifiedData.vfx}
+                            isCached={isUnifiedCached}
                             tooltipText="Menganalisis scene untuk menemukan titik interaksi terbaik bagi subjek dan memberikan saran pencahayaan yang disempurnakan."
                             modelValue={analysisModels.vfx}
                         >
-                            {vfxData?.smartInteraction ? 
-                                <p><strong>Interaksi Cerdas:</strong> {vfxData.smartInteraction.placementSuggestion}</p>
+                            {unifiedData.vfx?.smartInteraction ? 
+                                <p><strong>Interaksi Cerdas:</strong> {unifiedData.vfx.smartInteraction.placementSuggestion}</p>
                                 : <p className="italic">Tidak ada interaksi cerdas yang disarankan.</p>
                             }
-                            {vfxData?.lightingSuggestion && <p><strong>Saran Pencahayaan:</strong> {vfxData.lightingSuggestion}</p>}
+                            {unifiedData.vfx?.lightingSuggestion && <p><strong>Saran Pencahayaan:</strong> {unifiedData.vfx.lightingSuggestion}</p>}
                         </ModuleCard>
 
                         <ModuleCard
@@ -182,12 +180,13 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                             icon={<PersonPoseIcon className="w-4 h-4" />}
                             state={secondaryAnalysisState.pose}
                             onRegenerate={() => onRegenerate('pose')}
-                            isDataAvailable={!!poseData}
-                            isDisabled={!vfxData?.smartInteraction}
+                            isDataAvailable={!!dependentData?.pose}
+                            isDisabled={!unifiedData.vfx?.smartInteraction}
+                            isCached={isDependentCached}
                             tooltipText="Menyesuaikan pose subjek asli agar sesuai secara logis dengan titik interaksi yang disarankan oleh modul VFX."
                             modelValue={analysisModels.pose}
                         >
-                           {poseData && <p><strong>Pose Baru:</strong> {poseData.adaptedPoseDescription} (Confidence: {Math.round(poseData.confidenceScore * 100)}%)</p>}
+                           {dependentData?.pose && <p><strong>Pose Baru:</strong> {dependentData.pose.adaptedPoseDescription} (Confidence: {Math.round(dependentData.pose.confidenceScore * 100)}%)</p>}
                         </ModuleCard>
 
                         <ModuleCard
@@ -195,12 +194,13 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                             icon={<SunIcon className="w-4 h-4" />}
                             state={secondaryAnalysisState.shadow}
                             onRegenerate={() => onRegenerate('shadow')}
-                            isDataAvailable={!!shadowData}
-                            isDisabled={!poseData}
+                            isDataAvailable={!!dependentData?.shadow}
+                            isDisabled={!dependentData?.pose}
+                            isCached={isDependentCached}
                             tooltipText="Menghasilkan deskripsi bayangan yang realistis berdasarkan pose subjek yang telah diadaptasi, interaksi, dan pencahayaan scene."
                             modelValue={analysisModels.shadow}
                         >
-                            {shadowData && <p><strong>Deskripsi Bayangan:</strong> {shadowData.shadowDescription} (Arah: {shadowData.direction}, Kelembutan: {shadowData.softness})</p>}
+                            {dependentData?.shadow && <p><strong>Deskripsi Bayangan:</strong> {dependentData.shadow.shadowDescription} (Arah: {dependentData.shadow.direction}, Kelembutan: {dependentData.shadow.softness})</p>}
                         </ModuleCard>
 
                         <ModuleCard
@@ -208,11 +208,12 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                             icon={<BlueprintIcon className="w-4 h-4" />}
                             state={secondaryAnalysisState.perspective}
                             onRegenerate={() => onRegenerate('perspective')}
-                            isDataAvailable={!!perspectiveData}
+                            isDataAvailable={!!unifiedData.perspective}
+                            isCached={isUnifiedCached}
                             tooltipText="Menganalisis garis perspektif scene untuk merekomendasikan skala proporsional yang benar bagi subjek."
                             modelValue={analysisModels.perspective}
                         >
-                            {perspectiveData && <p><strong>Skala Direkomendasikan:</strong> {Math.round(perspectiveData.recommendedSubjectScale * 100)}% dari tinggi asli. ({perspectiveData.reasoning})</p>}
+                            {unifiedData.perspective && <p><strong>Skala Direkomendasikan:</strong> {Math.round(unifiedData.perspective.recommendedSubjectScale * 100)}% dari tinggi asli. ({unifiedData.perspective.reasoning})</p>}
                         </ModuleCard>
 
                         <ModuleCard
@@ -220,16 +221,17 @@ export const AnalysisPanel: React.FC<AnalysisPanelProps> = ({
                             icon={<PaletteIcon className="w-4 h-4" />}
                             state={secondaryAnalysisState.photometric}
                             onRegenerate={() => onRegenerate('photometric')}
-                            isDataAvailable={!!photometricData}
+                            isDataAvailable={!!unifiedData.photometric}
+                            isCached={isUnifiedCached}
                             tooltipText="Menganalisis pencahayaan scene secara mendalam untuk membuat rencana pencahayaan multi-titik yang teknis."
                             modelValue={analysisModels.photometric}
                         >
-                            {photometricData && (
+                            {unifiedData.photometric && (
                                 <>
-                                    <p><strong>Lampu Kunci:</strong> {photometricData.keyLight.direction}, {photometricData.keyLight.intensity}</p>
-                                    <p><strong>Lampu Pengisi:</strong> {photometricData.fillLight.direction}, {photometricData.fillLight.intensity}</p>
-                                    {photometricData.rimLight && <p><strong>Lampu Rim:</strong> Hadir</p>}
-                                    <p><strong>Mood Global:</strong> {photometricData.globalMood}</p>
+                                    <p><strong>Lampu Kunci:</strong> {unifiedData.photometric.keyLight.direction}, {unifiedData.photometric.keyLight.intensity}</p>
+                                    <p><strong>Lampu Pengisi:</strong> {unifiedData.photometric.fillLight.direction}, {unifiedData.photometric.fillLight.intensity}</p>
+                                    {unifiedData.photometric.rimLight && <p><strong>Lampu Rim:</strong> Hadir</p>}
+                                    <p><strong>Mood Global:</strong> {unifiedData.photometric.globalMood}</p>
                                 </>
                             )}
                         </ModuleCard>
